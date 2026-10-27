@@ -1,3 +1,20 @@
+# Proportional SVG wordmark 2.1.26-dev — 2026-10-27
+
+- Removed the 0.78 horizontal transform from both SVG and Android vector.
+  SVG viewBox and native viewport now use the natural 571x100 geometry; the
+  Compose container scales both axes equally. Wide-screen maximum width was
+  adjusted to retain the previous cap height; phone widths fit proportionally.
+- Rebuilt O with circular contours. Native pixel assertions check equal O width
+  and height at regular/narrow widths and larger system font scale. Connected
+  underline, add-icon alignment, all three entrance sweeps, pull refresh and
+  settings navigation still pass.
+- APK assembly, all five relevant root visual/gesture/navigation tests and
+  Android Lint passed. Other application logic is unchanged from 2.1.25-dev,
+  whose complete 87-test suite passed below.
+- Installed code 51 / 2.1.26-dev in UU/MuMu Android 15. No physical phone used.
+- APK contains no font files and retains the existing development signing key.
+- APK SHA-256: 927ee76f7ab1dee803c63208fcc1272927a3552455060b2e525f378e077ffa43
+
 # Android source / release verification — 2026-10-27
 
 Version 2.1.25-dev, code 50, application ID com.openrhodes.app.

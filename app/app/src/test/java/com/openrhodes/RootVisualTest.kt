@@ -89,7 +89,7 @@ class RootVisualTest {
             val homeImage = frame(root, "root-home")
             val heading = compose.onAllNodesWithText("OpenRhodes", useUnmergedTree = true).onFirst()
             val headingBounds = heading.fetchSemanticsNode().boundsInRoot
-            val unit = headingBounds.width / 440f
+            val unit = headingBounds.width / 571f
             val baseline = headingBounds.top + 74f * unit
             fun isInk(x: Int, y: Int): Boolean {
                 val color = homeImage.getPixel(x, y)
@@ -97,6 +97,24 @@ class RootVisualTest {
                     android.graphics.Color.green(color) > 150 &&
                     android.graphics.Color.blue(color) > 150
             }
+            // O is circular in the source paths. Check actual native ink, not only layout bounds.
+            val oPixels = mutableListOf<Pair<Int, Int>>()
+            for (y in
+                (headingBounds.top + 4f * unit).toInt() until
+                    (headingBounds.top + 76f * unit).toInt()) {
+                for (x in
+                    headingBounds.left.toInt() until (headingBounds.left + 72f * unit).toInt()) {
+                    if (isInk(x, y)) oPixels.add(x to y)
+                }
+            }
+            val oWidth = oPixels.maxOf { it.first } - oPixels.minOf { it.first } + 1
+            val oHeight = oPixels.maxOf { it.second } - oPixels.minOf { it.second } + 1
+            assertEquals(
+                "O must not be horizontally squeezed",
+                oHeight.toFloat(),
+                oWidth.toFloat(),
+                2f,
+            )
             val ruleLeft = headingBounds.left.toInt() + 2
             val ruleRight = headingBounds.right.toInt() - 2
             val ruleY =
@@ -106,8 +124,8 @@ class RootVisualTest {
                             (ruleRight - ruleLeft) * .95
                     }
             assertNotNull("Wordmark underline was not rendered", ruleY)
-            val pLeft = (headingBounds.left + 66f * .78f * unit).toInt()
-            val pRight = (headingBounds.left + 82f * .78f * unit).toInt()
+            val pLeft = (headingBounds.left + 74f * unit).toInt()
+            val pRight = (headingBounds.left + 90f * unit).toInt()
             val joinedColumns =
                 (pLeft until pRight).count { x ->
                     ((baseline + 1).toInt()..requireNotNull(ruleY)).all { y -> isInk(x, y) }
@@ -235,7 +253,7 @@ class RootVisualTest {
             val first = frame(root, "underline-entry-start", 0)
             val heading = compose.onAllNodesWithText("OpenRhodes", useUnmergedTree = true).onFirst()
             val bounds = heading.fetchSemanticsNode().boundsInRoot
-            val unit = bounds.width / 440f
+            val unit = bounds.width / 571f
             val y = (bounds.top + 92f * unit + 2).toInt()
             val left = bounds.left.toInt()
             val right = bounds.right.toInt()

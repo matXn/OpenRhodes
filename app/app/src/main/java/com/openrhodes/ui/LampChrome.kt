@@ -209,8 +209,8 @@ private fun HomeBrandToolbar(
         if (refreshing) sweep.animateTo(1f, infiniteRepeatable(tween(1000, easing = LinearEasing)))
     }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-        val brandWidth = (maxWidth - 56.dp).coerceAtLeast(1.dp).coerceAtMost(342.dp)
-        val brandHeight = brandWidth * (100f / 440f)
+        val brandWidth = (maxWidth - 56.dp).coerceAtLeast(1.dp).coerceAtMost(444.dp)
+        val brandHeight = brandWidth * (100f / 571f)
         val titleWidth = with(density) { brandWidth.toPx() }
         val ruleTop = with(density) { brandHeight.toPx() } * .92f
         Row(
