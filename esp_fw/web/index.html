@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0c0b">
+<title>Rhodes Light</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+@font-face{font-family:"Rhodes Title";font-weight:600;font-display:block;src:url(data:font/woff;base64,/*OUTFIT_WOFF*/) format("woff")}
+:root{--bg:#0d0c0b;--card:#171513;--line:#2a2622;--text:#ece6dd;--dim:#8f877c;
+  --amber:#f5a524;--amber-soft:rgba(245,165,36,.14);--bad:#ef6b5b;--ok:#7fc48a}
+html,body{background:var(--bg);color:var(--text);min-height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:15px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+main{max-width:420px;margin:0 auto;padding:22px 18px 28px;display:flex;flex-direction:column;gap:18px}
+a{color:inherit;text-decoration:none}
+
+/* ---------- 发光触控板：整块就是灯，标题和亮度都写在灯面上 ---------- */
+#pad-stage{perspective:900px;width:100%;border-radius:26px}
+#pad{position:relative;width:100%;height:0;padding-bottom:75%;aspect-ratio:4/3;border-radius:26px;touch-action:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;cursor:grab;
+  border:1px solid rgba(245,158,11,.2);background:#231b12;box-shadow:none;
+  clip-path:inset(0 round 26px);-webkit-backface-visibility:hidden;backface-visibility:hidden;will-change:transform;
+  transform:translate3d(var(--shift-x,0px),var(--shift-y,0px),0) rotateX(var(--tilt-x,0deg)) rotateY(var(--tilt-y,0deg));
+  transition:transform .36s cubic-bezier(.2,.8,.2,1);--ink:rgba(255,240,220,.88);--ink2:rgba(255,240,220,.55)}
+@supports(aspect-ratio:4/3){#pad{height:auto;padding-bottom:0}}
+#pad.dragging{cursor:grabbing;transition:transform .07s ease-out}
+/* Surface reflections sit below the text and never intercept a gesture. */
+#pad{isolation:isolate;overflow:hidden}
+#pad > *{z-index:2}
+#pad::before,#pad::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;
+  transition:opacity .45s ease-out;z-index:0}
+/* A narrow softbox reflection, a broad falloff, and a faint second pane.
+   Browser local time sets the light tint and strength; wall-clock phase moves its reflection. */
+/* Move a rendered reflection layer, rather than relying only on gradient
+   stop repaints; this also makes travel visible on high-brightness lamp faces. */
+#pad::before{inset:-40%;border-radius:0;
+  transform:translate3d(calc(var(--reflection-shift-x,0%) + var(--view-shift-x,0%)),calc(var(--reflection-shift-y,0%) + var(--view-shift-y,0%)),0) rotate(calc(var(--reflection-rotate,0deg) + var(--view-rotate,0deg)));
+  will-change:transform;
+  background:linear-gradient(115deg,transparent 28%,rgba(var(--reflection-tint,255,249,233),.04) 39%,
+    rgba(var(--reflection-tint,255,249,233),.22) 46%,rgba(var(--reflection-tint,255,249,233),.82) 49.3%,
+    rgba(var(--reflection-tint,255,249,233),.94) 50%,rgba(var(--reflection-tint,255,249,233),.3) 51.2%,
+    rgba(var(--reflection-tint,255,249,233),.06) 56%,transparent 66%),
+    linear-gradient(115deg,transparent 61%,rgba(var(--reflection-tint,255,249,233),.13) 64%,transparent 69%);
+  mix-blend-mode:normal}
+#pad::after{z-index:1;background:
+  radial-gradient(ellipse 75% 38% at calc(var(--shine-x,50%) + var(--view-glow-x,0%)) calc(var(--shine-y,28%) + var(--view-glow-y,0%)),
+    rgba(var(--reflection-tint,255,249,233),.26),rgba(255,243,215,.08) 36%,transparent 76%),
+  linear-gradient(var(--shine-angle,120deg),rgba(255,250,239,.055),transparent 45%,rgba(25,15,5,.10));
+  box-shadow:inset calc(var(--rim-x,0px) + var(--view-rim-x,0px)) calc(var(--rim-y,1px) + var(--view-rim-y,0px)) 1px rgba(var(--reflection-tint,255,249,233),.46),
+    inset 0 0 0 1px rgba(255,244,215,.08);}
+#pad.sheen-active::before{opacity:calc(var(--specular,.5) * var(--view-specular,1) * var(--surface-reflection-scale,1));transition:opacity .16s ease-out,transform .36s cubic-bezier(.2,.8,.2,1)}
+#pad.dragging::before{transition:opacity .12s ease-out,transform .07s ease-out}
+#pad.sheen-active::after{opacity:calc(var(--coat,.7) * var(--surface-reflection-scale,1));transition:opacity .16s ease-out}
+#pad.off{--ink:rgba(236,230,221,.68);--ink2:rgba(236,230,221,.42)}
+#pad.lit{--ink:rgba(48,28,4,.82);--ink2:rgba(48,28,4,.55)}
+#pad h1{position:absolute;left:22px;top:16px;font-family:"Rhodes Title","Outfit","Avenir Next","Futura",sans-serif;font-size:22px;font-weight:600;letter-spacing:.3px;color:var(--ink)}
+#link{position:absolute;right:20px;top:22px;width:8px;height:8px;border-radius:50%;background:var(--ink2)}
+#link.ok{background:var(--ok)}#link.bad{background:var(--bad)}
+#level{position:absolute;left:20px;bottom:12px;font-size:56px;font-weight:200;line-height:1;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+
+#level small{font-size:20px;font-weight:300;margin-left:3px;color:inherit}
+@supports((-webkit-background-clip:text) or (background-clip:text)){
+  #pad h1,#level,#hint{background:linear-gradient(155deg,var(--level-ink-top,#fff9eb),var(--level-ink-bottom,#e8d2b0));
+    -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}}
+
+#hint{position:absolute;right:20px;bottom:20px;font-size:12px;color:var(--ink2);text-align:right}
+#pad h1,#level,#hint{color:var(--level-ink-top,#fff9eb)}
+@supports((-webkit-background-clip:text) or (background-clip:text)){
+  #pad h1,#level,#hint{color:transparent;-webkit-text-fill-color:transparent}}
+
+.row{display:flex;gap:10px;align-items:center}
+button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:9px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:active{transform:scale(.97)}
+button.on{background:var(--amber-soft);border-color:rgba(245,165,36,.55);color:var(--amber)}
+.seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px}
+.seg button{min-height:44px;border:0;background:none;padding:6px 14px;border-radius:9px;color:var(--dim)}
+.seg button.on{background:var(--amber-soft);color:var(--amber)}
+#toast{min-height:18px;margin:-10px 0 -8px;font-size:13px;color:var(--dim);text-align:center}
+#toast.bad{color:var(--bad)}
+
+/* ---------- 呼吸函数 ---------- */
+#breath{display:none;flex-direction:column;gap:14px}
+#breath.show{display:flex}
+#breath h2{font-size:13px;font-weight:500;color:var(--dim);display:flex;justify-content:space-between}
+#breath h2 span{font-variant-numeric:tabular-nums}
+#curve-wrap{position:relative;height:96px}
+#curve{width:100%;height:96px;display:block}
+#curveDot{position:absolute;width:8px;height:8px;border-radius:50%;background:#ffe2a8;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 0 1px rgba(255,226,168,.15)}
+.param{display:grid;grid-template-columns:44px 1fr 58px;align-items:center;gap:10px;font-size:13px;color:var(--dim)}
+.param output{text-align:right;color:var(--text);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:32px;border-radius:2px;background:transparent;outline:none}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--line)}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{margin-top:-8px;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--amber);border:3px solid var(--bg)}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--amber);border:3px solid var(--bg)}
+
+@media(prefers-reduced-motion:reduce){#pad{transition:none;transform:none}#pad::before,#pad::after{display:none}#curveDot{display:none}}
+footer{display:flex;justify-content:center;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-top:6px}
+footer a{display:inline-flex;align-items:center;gap:6px}
+footer svg{width:14px;height:14px;fill:currentColor}
+</style>
+</head>
+<body>
+<main>
+  <div id="pad-stage">
+  <div id="pad" role="slider" aria-label="亮度" aria-valuemin="1" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+    <h1>Rhodes Light</h1>
+    <i id="link" title="连接状态"></i>
+    <div id="level">--</div>
+    <div id="hint">滑动调光<br>轻点开关</div>
+  </div>
+
+  </div>
+
+  <div class="row">
+    <div class="seg" id="mode">
+      <button data-mode="steady">常亮</button>
+      <button data-mode="breathing">呼吸</button>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <div id="breath">
+    <h2>呼吸函数 <span id="formula"></span></h2>
+    <div id="curve-wrap">
+    <svg id="curve" viewBox="0 0 300 96" preserveAspectRatio="none">
+      <line x1="0" y1="88" x2="300" y2="88" stroke="#2a2622" stroke-width="1"/>
+      <path id="curvePath" fill="none" stroke="#f5a524" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <span id="curveDot" aria-hidden="true"></span>
+    </div>
+    <label class="param">周期<input id="period" type="range" min="2" max="20" step="0.1"><output id="periodOut"></output></label>
+    <label class="param">最暗<input id="floor" type="range" min="0" max="80" step="1"><output id="floorOut"></output></label>
+    <label class="param">曲线<input id="shape" type="range" min="50" max="300" step="5"><output id="shapeOut"></output></label>
+  </div>
+
+  <footer>By
+    <a href="https://github.com/matXn/OpenRhodes" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      OpenRhodes
+    </a>
+  </footer>
+</main>
+<script>/*CONTROLLER*/</script>
+</body>
+</html>
