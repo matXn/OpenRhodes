@@ -10,6 +10,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.openrhodes.domain.*
 import com.openrhodes.ui.RhodesRoot
+import com.openrhodes.ui.WordmarkGeometry
 import java.io.File
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -87,56 +88,72 @@ class RootVisualTest {
             controller.get().setContent { RhodesRoot(app, requested) }
             val root = controller.get().window.decorView
             val homeImage = frame(root, "root-home")
-            val heading = compose.onAllNodesWithText("OpenRhodes", useUnmergedTree = true).onFirst()
+            val heading =
+                compose.onAllNodesWithText("Open Rhodes", useUnmergedTree = true).onFirst()
             val headingBounds = heading.fetchSemanticsNode().boundsInRoot
-            val unit = headingBounds.width / 571f
-            val baseline = headingBounds.top + 74f * unit
+            val unit = headingBounds.width / WordmarkGeometry.Width
+            val baseline = headingBounds.top + WordmarkGeometry.Baseline * unit
             fun isInk(x: Int, y: Int): Boolean {
                 val color = homeImage.getPixel(x, y)
                 return android.graphics.Color.red(color) > 150 &&
                     android.graphics.Color.green(color) > 150 &&
                     android.graphics.Color.blue(color) > 150
             }
-            // O is circular in the source paths. Check actual native ink, not only layout bounds.
+            // 对照原始字形的自然宽高比检查像素，不能仅检查布局容器。
             val oPixels = mutableListOf<Pair<Int, Int>>()
             for (y in
-                (headingBounds.top + 4f * unit).toInt() until
-                    (headingBounds.top + 76f * unit).toInt()) {
+                (headingBounds.top + WordmarkGeometry.OTop * unit).toInt() until
+                    (headingBounds.top + WordmarkGeometry.OBottom * unit).toInt()) {
                 for (x in
-                    headingBounds.left.toInt() until (headingBounds.left + 72f * unit).toInt()) {
+                    headingBounds.left.toInt() until
+                        (headingBounds.left + WordmarkGeometry.OWidth * unit).toInt()) {
                     if (isInk(x, y)) oPixels.add(x to y)
                 }
             }
             val oWidth = oPixels.maxOf { it.first } - oPixels.minOf { it.first } + 1
             val oHeight = oPixels.maxOf { it.second } - oPixels.minOf { it.second } + 1
             assertEquals(
-                "O must not be horizontally squeezed",
-                oHeight.toFloat(),
+                "O 应保持原始字形的自然比例",
+                oHeight * WordmarkGeometry.OWidth /
+                    (WordmarkGeometry.OBottom - WordmarkGeometry.OTop),
                 oWidth.toFloat(),
                 2f,
             )
             val ruleLeft = headingBounds.left.toInt() + 2
             val ruleRight = headingBounds.right.toInt() - 2
             val ruleY =
-                ((headingBounds.top + 92f * unit).toInt()..(headingBounds.top + 97f * unit).toInt())
+                ((headingBounds.top + WordmarkGeometry.RuleTop * unit).toInt()..(headingBounds.top +
+                                (WordmarkGeometry.RuleTop + 5f) * unit)
+                            .toInt())
                     .firstOrNull { y ->
                         (ruleLeft until ruleRight).count { x -> isInk(x, y) } >
                             (ruleRight - ruleLeft) * .95
                     }
             assertNotNull("Wordmark underline was not rendered", ruleY)
-            val pLeft = (headingBounds.left + 74f * unit).toInt()
-            val pRight = (headingBounds.left + 90f * unit).toInt()
+            val pLeft = headingBounds.left.toInt()
+            val pRight = (headingBounds.left + WordmarkGeometry.OpenEnd * unit).toInt()
             val joinedColumns =
                 (pLeft until pRight).count { x ->
                     ((baseline + 1).toInt()..requireNotNull(ruleY)).all { y -> isInk(x, y) }
                 }
             assertTrue("Underline is detached from the p descender", joinedColumns >= 2)
+            val spaceX =
+                (headingBounds.left +
+                        (WordmarkGeometry.OpenEnd + WordmarkGeometry.RhodesStart) * .5f * unit)
+                    .toInt()
+            for (y in headingBounds.top.toInt() until (headingBounds.top + 80f * unit).toInt()) {
+                assertEquals(
+                    "Open 与 Rhodes 之间应有清晰空格",
+                    android.graphics.Color.BLACK,
+                    homeImage.getPixel(spaceX, y),
+                )
+            }
             homeImage.recycle()
             assertTrue(
                 "Vector title must fit the viewport",
                 headingBounds.right < viewportWidth * 2,
             )
-            val expectedPlusCenter = headingBounds.top + headingBounds.height * .40f
+            val expectedPlusCenter = headingBounds.top + WordmarkGeometry.CapCenter * unit
             val plusBounds =
                 compose.onNodeWithContentDescription("添加灯具").fetchSemanticsNode().boundsInRoot
             assertEquals(
@@ -152,7 +169,7 @@ class RootVisualTest {
             compose.onNodeWithText("离线").assertDoesNotExist()
             val headingLeft =
                 compose
-                    .onAllNodesWithText("OpenRhodes", useUnmergedTree = true)
+                    .onAllNodesWithText("Open Rhodes", useUnmergedTree = true)
                     .onFirst()
                     .fetchSemanticsNode()
                     .boundsInRoot
@@ -164,6 +181,13 @@ class RootVisualTest {
                     .boundsInRoot
                     .left
             assertEquals("Home title and device name must align", headingLeft, nameLeft, 1f)
+            val nameTop =
+                compose
+                    .onNodeWithText(name, useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+                    .top
+            assertTrue("首页字标下方留白不应超过 45dp", nameTop - requireNotNull(ruleY) < 90f)
             compose.onNodeWithText("自动发现").assertDoesNotExist()
             compose.onNodeWithText("重新搜索").assertDoesNotExist()
             compose.onNodeWithContentDescription("GitHub 项目 OpenRhodes").assertIsDisplayed()
@@ -251,10 +275,11 @@ class RootVisualTest {
             controller.get().setContent { RhodesRoot(app, MutableStateFlow(null)) }
             val root = controller.get().window.decorView
             val first = frame(root, "underline-entry-start", 0)
-            val heading = compose.onAllNodesWithText("OpenRhodes", useUnmergedTree = true).onFirst()
+            val heading =
+                compose.onAllNodesWithText("Open Rhodes", useUnmergedTree = true).onFirst()
             val bounds = heading.fetchSemanticsNode().boundsInRoot
-            val unit = bounds.width / 571f
-            val y = (bounds.top + 92f * unit + 2).toInt()
+            val unit = bounds.width / WordmarkGeometry.Width
+            val y = (bounds.top + WordmarkGeometry.RuleTop * unit + 2).toInt()
             val left = bounds.left.toInt()
             val right = bounds.right.toInt()
             fun countInk(image: Bitmap) =
@@ -315,19 +340,19 @@ class RootVisualTest {
                 "Highlight must travel right",
                 glintCenter(darkPass) > glintCenter(firstPass) + 30f,
             )
-            val returning = frame(root, "wordmark-sheen-returning", 1100)
-            val returned = frame(root, "wordmark-sheen-returned", 500)
+            val returning = frame(root, "wordmark-sheen-repeat-start", 1100)
+            val returned = frame(root, "wordmark-sheen-repeat-advanced", 500)
             assertTrue(
-                "Highlight must return left",
-                glintCenter(returned) < glintCenter(returning) - 30f,
+                "高光的新一轮仍应向右移动",
+                glintCenter(returned) > glintCenter(returning) + 30f,
             )
             for (image in listOf(firstPass, darkPass, returning, returned)) {
                 assertEquals(
                     "Highlight leaked into the O counter",
                     android.graphics.Color.BLACK,
                     image.getPixel(
-                        (bounds.left + 36f * unit).toInt(),
-                        (bounds.top + 40f * unit).toInt(),
+                        (bounds.left + WordmarkGeometry.OCounterX * unit).toInt(),
+                        (bounds.top + WordmarkGeometry.OCounterY * unit).toInt(),
                     ),
                 )
                 assertTrue(
@@ -348,10 +373,50 @@ class RootVisualTest {
                 )
                 .forEach { it.recycle() }
             val before = app.discoveryRevision.value
-            compose.onNode(hasScrollAction()).performTouchInput {
-                swipe(Offset(centerX, height * .1f), Offset(centerX, height * .75f), 350)
+            val marker = compose.onNodeWithText("添加你的第一盏灯", useUnmergedTree = true)
+            val originalTop = marker.fetchSemanticsNode().boundsInRoot.top
+            val footer = compose.onNodeWithContentDescription("GitHub 项目 OpenRhodes")
+            val originalFooter = footer.fetchSemanticsNode().boundsInRoot
+            val scrolling = compose.onNode(hasScrollAction())
+            scrolling.performTouchInput {
+                down(Offset(centerX, height * .1f))
+                moveBy(Offset(0f, 80f), 120)
             }
+            val partialPull = frame(root, "home-pull-partial", 32)
+            val partialOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
+            assertTrue("列表应跟随未达阈值的下拉手势", partialOffset in 10f..90f)
+            val progress =
+                (left until right)
+                    .count { px ->
+                        android.graphics.Color.green(partialPull.getPixel(px, y)) > 210
+                    }
+                    .toFloat() / (right - left)
+            assertEquals("横条进度应与列表下移距离匹配", partialOffset / 128f, progress, .10f)
+            assertEquals("下拉时底部署名应固定", originalFooter, footer.fetchSemanticsNode().boundsInRoot)
+            assertEquals("下拉时标题应固定", bounds, heading.fetchSemanticsNode().boundsInRoot)
+            assertEquals("达到阈值前不能刷新", before, app.discoveryRevision.value)
+            scrolling.performTouchInput { up() }
+            frame(root, "home-pull-cancelled", 800).recycle()
+            assertEquals(
+                "短距离下拉松手应回位",
+                originalTop,
+                marker.fetchSemanticsNode().boundsInRoot.top,
+                2f,
+            )
+            assertEquals("短距离松手不能刷新", before, app.discoveryRevision.value)
+            scrolling.performTouchInput {
+                down(Offset(centerX, height * .1f))
+                moveBy(Offset(0f, 400f), 200)
+            }
+            val armedPull = frame(root, "home-pull-armed", 32)
+            val armedOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
+            assertTrue("达到阈值后仍保留有上限的阻尼位移", armedOffset in 120f..162f)
+            assertTrue("达到刷新阈值横条应填满", countInk(armedPull) > (right - left) * .95)
+            assertEquals("尚未松手时不能刷新", before, app.discoveryRevision.value)
+            scrolling.performTouchInput { up() }
             frame(root, "underline-after-pull").recycle()
+            partialPull.recycle()
+            armedPull.recycle()
             compose.waitUntil(5000) { app.discoveryRevision.value == before + 1 }
             compose
                 .onAllNodes(

@@ -30,8 +30,8 @@ android {
         applicationId = "com.openrhodes.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 52
-        versionName = "2.1.27-dev"
+        versionCode = 53
+        versionName = "2.1.28-dev"
     }
     buildFeatures { compose = true }
     compileOptions {

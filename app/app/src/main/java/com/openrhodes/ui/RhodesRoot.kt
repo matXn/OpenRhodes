@@ -13,26 +13,30 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextGeometricTransform
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openrhodes.RhodesApp
 import com.openrhodes.domain.*
+import kotlin.math.roundToInt
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -103,7 +107,7 @@ fun RhodesRoot(app: RhodesApp, requested: MutableStateFlow<String?>) {
                 LampToolbar(
                     title =
                         when {
-                            lamp == null -> "OpenRhodes"
+                            lamp == null -> "Open Rhodes"
                             setup -> "网络设置"
                             information -> "设备设置"
                             else -> lamp.name
@@ -146,7 +150,7 @@ fun RhodesRoot(app: RhodesApp, requested: MutableStateFlow<String?>) {
                                 .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 20.dp)
                         ) {
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(if (lamp == null) 4.dp else 16.dp))
                             if (startup != null)
                                 Text(
                                     startup!!,
@@ -208,14 +212,29 @@ private fun HomeRefreshFrame(
     content: @Composable () -> Unit,
 ) {
     if (enabled) {
-        PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = onRefresh,
-            state = state,
-            indicator = {},
-            modifier = modifier,
+        // 手势阈值、内容位移与横条进度共用 Material3 的归一化距离。
+        val threshold = 64.dp
+        val thresholdPx = with(LocalDensity.current) { threshold.toPx() }
+        Box(
+            modifier
+                .clipToBounds()
+                .pullToRefresh(
+                    isRefreshing = refreshing,
+                    onRefresh = onRefresh,
+                    state = state,
+                    threshold = threshold,
+                )
         ) {
-            content()
+            Box(
+                Modifier.fillMaxSize().offset {
+                    IntOffset(
+                        0,
+                        (thresholdPx * state.distanceFraction.coerceIn(0f, 1.25f)).roundToInt(),
+                    )
+                }
+            ) {
+                content()
+            }
         }
     } else {
         Box(modifier) { content() }
@@ -270,7 +289,7 @@ private fun LampRow(app: RhodesApp, lamp: Lamp, open: () -> Unit) {
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Row(Modifier.padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
                     lamp.name,

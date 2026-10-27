@@ -212,7 +212,7 @@ private fun HomeBrandToolbar(
             animationSpec =
                 infiniteRepeatable(
                     tween(2600, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse,
+                    repeatMode = RepeatMode.Restart,
                 ),
             label = "wordmarkSheenPosition",
         )
@@ -223,13 +223,15 @@ private fun HomeBrandToolbar(
         sweep.snapTo(0f)
         if (refreshing) sweep.animateTo(1f, infiniteRepeatable(tween(1000, easing = LinearEasing)))
     }
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         val brandWidth = (maxWidth - 56.dp).coerceAtLeast(1.dp).coerceAtMost(444.dp)
-        val brandHeight = brandWidth * (100f / 571f)
+        val brandHeight = brandWidth * (WordmarkGeometry.Height / WordmarkGeometry.Width)
         val titleWidth = with(density) { brandWidth.toPx() }
-        val ruleTop = with(density) { brandHeight.toPx() } * .92f
+        val ruleTop =
+            with(density) { brandHeight.toPx() } *
+                (WordmarkGeometry.RuleTop / WordmarkGeometry.Height)
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 80.dp),
+            Modifier.fillMaxWidth().heightIn(min = 64.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f)) {
@@ -285,13 +287,15 @@ private fun HomeBrandToolbar(
                                         drawRect(Cream, Offset(left, ruleTop), Size(width, height))
                                     } else {
                                         drawRect(
-                                            Cream.copy(alpha = 1f - .78f * active),
+                                            Cream.copy(
+                                                alpha = if (pull > 0f) .22f else 1f - .78f * busyMix
+                                            ),
                                             Offset(0f, ruleTop),
                                             Size(titleWidth, height),
                                         )
                                         if (pull > 0f)
                                             drawRect(
-                                                Cream.copy(alpha = pull * (1f - busyMix)),
+                                                Cream.copy(alpha = 1f - busyMix),
                                                 Offset(0f, ruleTop),
                                                 Size(titleWidth * pull, height),
                                             )
@@ -318,8 +322,12 @@ private fun HomeBrandToolbar(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            // The vector's uppercase face is centered at y=40 in its 100-unit viewport.
-            Box(Modifier.offset(y = brandHeight * -.10f)) {
+            // 加号与矢量字标的大写字面中心对齐。
+            Box(
+                Modifier.offset(
+                    y = brandHeight * (WordmarkGeometry.CapCenter / WordmarkGeometry.Height - .5f)
+                )
+            ) {
                 if (action != null) NavIcon(actionGlyph, actionDescription, action)
                 else Spacer(Modifier.size(48.dp))
             }
