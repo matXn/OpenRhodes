@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name" translatable="false">OpenRhodes</string>
+    <string name="widget_choose">选择灯具</string>
+    <string name="widget_mac_pending">#MAC 待确认</string>
+    <string name="widget_cycle">切换亮度</string>
+    <string name="widget_connection_online">灯具在线</string>
+    <string name="widget_connection_offline">灯具离线</string>
+    <string name="widget_connection_unknown">连接状态待确认</string>
+    <string name="widget_stages" translatable="false">· · · ·</string>
+</resources>

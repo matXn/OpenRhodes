@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <application android:name="com.openrhodes.RhodesApp" android:label="OpenRhodes"
+        android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.OpenRhodes" android:allowBackup="false"
+        android:usesCleartextTraffic="true" android:supportsRtl="true">
+        <activity android:name="com.openrhodes.MainActivity" android:exported="true"
+            android:launchMode="singleTop" android:theme="@style/Theme.OpenRhodes.Starting" />
+        <activity android:name="com.pearlnode.MainActivity" android:exported="true"
+            android:launchMode="singleTop" android:theme="@style/Theme.OpenRhodes.Starting">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name="com.pearlnode.ui.widget.ShellyDeviceWidgetConfigActivity" android:exported="true">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
+        </activity>
+        <receiver android:name="com.pearlnode.ui.widget.ShellyDeviceWidgetReceiver" android:exported="false" android:label="OpenRhodes">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/lamp_widget" />
+        </receiver>
+        <receiver android:name="com.pearlnode.ui.widget.ShellyWidgetReceiver" android:exported="false" android:label="OpenRhodes · 兼容组件">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/lamp_widget" />
+        </receiver>
+        <receiver android:name="com.openrhodes.widget.PinResult" android:exported="false" />
+        <receiver android:name="com.openrhodes.widget.SquareLampWidgetReceiver" android:exported="false" android:label="OpenRhodes · 2×2">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/lamp_widget_square" />
+        </receiver>
+    </application>
+</manifest>

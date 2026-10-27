@@ -1,0 +1,386 @@
+/* RhodesLight web preview.
+ *
+ * Card design language: 「光体 Lumen」 — the card is a lamp, not a readout.
+ *   1. Colour temperature follows luminous flux (deep amber -> incandescent white).
+ *   2. Light spills past the card into the dark (halo, synced with breath).
+ *   3. Light has depth (title / number / rail sit on different z planes).
+ *   4. Light is touchable (a soft glow blooms under the fingertip).
+ *   5. Light is alive (ignition / filament cool-down on power changes).
+ *   6. Light is the scale (a luminous rail along the lower edge).
+ * Micro-grain kills gradient banding; the % sign becomes a small superscript.
+ */
+
+:root {
+  --gold: #eeac43;
+  --cream: #f4e8d1;
+  --muted: #a69981;
+  --ink-top: #b0a18f;
+  --ink-bottom: #938169;
+  --online: #89bc87;
+  --device-w: 393px;
+  --device-h: 852px;
+  --card-radius: 28px;
+  --halo-color: #eeac43;
+  --rail-hot: #ffd9a0;
+  --rail-dim: rgba(255, 217, 160, 0.25);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  background: #0b0b0c;
+  color: var(--cream);
+  font-family: Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(120% 80% at 50% 0%, #16130d 0%, #0b0b0c 55%, #080808 100%);
+}
+
+.device {
+  position: relative;
+  width: min(var(--device-w), 100vw);
+  height: min(var(--device-h), 100vh);
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 520px) and (min-height: 900px) {
+  .device {
+    border-radius: 44px;
+    box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(238, 172, 67, 0.14);
+  }
+}
+
+/* ---- Toolbar (LampToolbar) ---- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  padding: 7px 12px 6px;
+  min-height: 65px;
+  flex: none;
+}
+
+.icon-btn {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--cream);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background 140ms ease;
+}
+
+.icon-btn:hover { background: rgba(244, 232, 209, 0.08); }
+
+.titles {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 4px 8px;
+}
+
+.titles h1 {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titles p {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Scrollable content ---- */
+
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px 24px;
+  /* Visible so the halo is never sliced by the scroll padding. */
+  overflow: visible;
+  scrollbar-width: none;
+}
+
+@media (max-height: 700px) {
+  .content { overflow-y: auto; overflow-x: hidden; }
+}
+
+.content::-webkit-scrollbar { display: none; }
+
+/* ---- Lamp card · 光体 Lumen ---- */
+
+.lamp {
+  position: relative;
+}
+
+/* 2 · Light spills into the dark. Sits behind the card, never clips it. */
+.halo {
+  position: absolute;
+  inset: 4px 2px;
+  border-radius: 44px;
+  background: var(--halo-color);
+  filter: blur(30px);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  perspective: 1500px;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card.is-pressed { cursor: grabbing; }
+
+.card-plane {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.card canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ink {
+  background-image: linear-gradient(var(--ink-top), var(--ink-bottom));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 3 · Depth: each layer floats at its own height above the luminous surface. */
+.card-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transform: translateZ(24px);
+}
+
+.card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 24px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-image: linear-gradient(var(--ink-top), var(--ink-bottom));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 10px 1px rgba(137, 188, 135, 0.55);
+}
+
+.card-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  transform: translateZ(46px);
+}
+
+/* 6 · The luminous rail: output rendered as a length of light in a dark slot.
+   Lives on the lamp body itself (no z-lift), so it never clips at the edge. */
+.light-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.rail-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  width: 56%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, var(--rail-dim), var(--rail-hot));
+  box-shadow: 0 0 14px 1px var(--rail-hot);
+}
+
+.rail-fill::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: #fff6e6;
+  box-shadow: 0 0 8px 2px var(--rail-hot);
+}
+
+.percent {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: var(--num-line, 74.4px);
+  font-size: var(--num-size, 62px);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--num-line, 74.4px);
+}
+
+/* Instrument typography: the unit becomes a small raised annotation. */
+.pct-sign {
+  font-size: 0.44em;
+  font-weight: 300;
+  letter-spacing: 0;
+  margin-left: 0.1em;
+  position: relative;
+  top: -0.2em;
+  opacity: 0.85;
+}
+
+.p-static {
+  display: block;
+  white-space: nowrap;
+  background-image: linear-gradient(var(--ink-top), var(--ink-bottom));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.p-roll { display: none; }
+
+.percent.is-rolling .p-static { display: none; }
+.percent.is-rolling .p-roll { display: block; position: absolute; inset: 0; }
+
+.p-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  line-height: var(--num-line, 74.4px);
+  background-image: linear-gradient(var(--ink-top), var(--ink-bottom));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hint {
+  flex: none;
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 17px;
+  text-align: right;
+  white-space: pre-line;
+  background-image: linear-gradient(var(--ink-top), var(--ink-bottom));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Light mode selector (LightModeSelector) ---- */
+
+.mode {
+  display: flex;
+  gap: 4px;
+  margin-top: 24px;
+  padding: 4px;
+  border-radius: 16px;
+  background: #000;
+}
+
+.seg {
+  flex: 1;
+  min-height: 48px;
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.seg.is-on {
+  background: rgba(238, 172, 67, 0.16);
+  color: var(--cream);
+  font-weight: 500;
+}
+
+/* ---- Footer (ProjectCredit) ---- */
+
+.credit {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.credit:hover { color: #c0b49c; }
