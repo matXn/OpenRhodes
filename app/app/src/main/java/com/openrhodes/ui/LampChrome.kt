@@ -173,7 +173,8 @@ internal fun LampToolbar(
             Text(
                 title,
                 fontSize = if (largeTitle) 32.sp else 21.sp,
-                fontWeight = if (largeTitle) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = if (largeTitle) FontWeight.Light else FontWeight.Medium,
+                fontFamily = if (largeTitle) DeviceTitleFont else null,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -221,7 +222,7 @@ private fun HomeBrandToolbar(
         animateFloatAsState(if (refreshing) 1f else 0f, tween(180), label = "underlineRefresh")
     LaunchedEffect(refreshing) {
         sweep.snapTo(0f)
-        if (refreshing) sweep.animateTo(1f, infiniteRepeatable(tween(1000, easing = LinearEasing)))
+        if (refreshing) sweep.animateTo(1f, infiniteRepeatable(tween(2400, easing = LinearEasing)))
     }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         val brandWidth = (maxWidth - 56.dp).coerceAtLeast(1.dp).coerceAtMost(444.dp)
@@ -269,7 +270,9 @@ private fun HomeBrandToolbar(
                                 )
                                 val entrance = underlineEntrance().coerceIn(0f, 3f)
                                 val pull = refreshPull().coerceIn(0f, 1f)
-                                val height = 3.5.dp.toPx()
+                                val height =
+                                    size.height *
+                                        (WordmarkGeometry.RuleHeight / WordmarkGeometry.Height)
                                 val active = maxOf(pull, busyMix)
                                 clipRect(
                                     left = 0f,

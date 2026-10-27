@@ -1,0 +1,36 @@
+{
+  "label": "Open Rhodes",
+  "source": "user-provided openrhodes.png",
+  "sourceImageSha256": "524fe2e4e366a9d405f7f9a600fa8cce27414e93e3bf01f595100cf943283475",
+  "originalCanvas": [
+    1536,
+    420
+  ],
+  "crop": [
+    0,
+    89,
+    1536,
+    272
+  ],
+  "metrics": {
+    "Width": 1536.0,
+    "Height": 272.0,
+    "Baseline": 209.0,
+    "RuleTop": 254.0,
+    "RuleHeight": 17.0,
+    "CapCenter": 111.50809860229492,
+    "OLeft": 5.7177910804748535,
+    "OWidth": 200.92072820663452,
+    "OTop": 10.016197204589844,
+    "OBottom": 213.0,
+    "OCounterX": 106.17815518379211,
+    "OCounterY": 111.50809860229492,
+    "OpenEnd": 623.0,
+    "RhodesStart": 707.0
+  },
+  "contourCount": 13,
+  "pointCount": 2294,
+  "maximumSimplificationErrorPixels": 0.08,
+  "nativePathCount": 5,
+  "longestNativePathBytes": 9013
+}

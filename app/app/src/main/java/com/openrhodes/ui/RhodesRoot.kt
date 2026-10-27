@@ -27,9 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextGeometricTransform
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -269,7 +267,8 @@ private fun ThirdPartyNotices(close: () -> Unit) {
 private fun LampRow(app: RhodesApp, lamp: Lamp, open: () -> Unit) {
     val session = remember(lamp.id, lamp.hardware) { app.session(lamp.id) }
     val observation by session.observation.collectAsStateWithLifecycle()
-    val macLabel = lamp.hardware?.displayTag ?: "#MAC 待确认"
+    val macLabel = lamp.hardware?.displayTag?.removePrefix("#")?.let { "Mac:$it" } ?: "Mac:—"
+    val levelLabel = observation.state?.let { "${if (it.on) it.brightness else 0}%" } ?: "—"
     val statusColor =
         when {
             observation.connecting -> Gold
@@ -289,31 +288,58 @@ private fun LampRow(app: RhodesApp, lamp: Lamp, open: () -> Unit) {
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    lamp.name,
-                    fontSize = 20.sp,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    macLabel,
-                    color = Muted,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = (-.3).sp,
-                    style =
-                        TextStyle(textGeometricTransform = TextGeometricTransform(scaleX = .96f)),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-            }
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(10.dp).semantics { contentDescription = statusDescription }) {
-                    drawCircle(statusColor)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 320.dp
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        lamp.name,
+                        color = Color(0xFFF5F3ED),
+                        fontFamily = DeviceTitleFont,
+                        fontWeight = FontWeight.Light,
+                        fontSize = if (compact) 28.sp else 34.sp,
+                        letterSpacing = (-.8).sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Canvas(
+                            Modifier.size(10.dp).semantics {
+                                contentDescription = statusDescription
+                            }
+                        ) {
+                            drawCircle(statusColor)
+                        }
+                        Text(
+                            macLabel,
+                            color = Color(0xFFC6C3BB),
+                            fontFamily = AddressFont,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            letterSpacing = (-.35).sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                 }
+                Text(
+                    levelLabel,
+                    color = Color(0xFFF5F3ED),
+                    fontFamily = BrightnessFont,
+                    fontWeight = FontWeight.ExtraLight,
+                    fontSize = if (compact) 36.sp else 40.sp,
+                    letterSpacing = (-2).sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -424,12 +450,18 @@ private fun LampInformation(
     SettingsEntry("设备详情", "硬件身份与历史连接地址") { details = !details }
     if (details) {
         Text("硬件身份", color = Muted, modifier = Modifier.padding(top = 16.dp))
-        Text(lamp.hardware?.value ?: "旧记录，尚未确认")
+        Text(
+            lamp.hardware?.displayTag?.removePrefix("#") ?: "旧记录，尚未确认",
+            fontFamily = AddressFont,
+            fontWeight = FontWeight.Light,
+        )
         Text("保存的地址", color = Muted, modifier = Modifier.padding(top = 20.dp))
         lamp.endpoints.forEach {
             Text(
                 it.host + if (it == observation.endpoint) " · 上次成功连接" else " · 历史地址",
                 modifier = Modifier.padding(vertical = 5.dp),
+                fontFamily = AddressFont,
+                fontWeight = FontWeight.Light,
             )
         }
     }

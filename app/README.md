@@ -19,12 +19,18 @@ OpenRhodes 原生 Android 客户端源码。此目录是独立 Gradle 工程，A
 
 ## 当前开发版
 
-2.1.28-dev（versionCode 53）。首页 `Open Rhodes` 字标由 Outfit ExtraBold 的自然字形轮廓生成 SVG，
-Android 使用匹配的原生 vector，不分发 Polymath Demo 或其他字体文件。
-`artwork/openrhodes-wordmark.svg` 可直接用于浏览器；
-`python tools/build_wordmark.py` 同步生成 SVG 与原生 vector。
-字标内有每程 2.6 秒、仅向右扫描的柔和白色高光，透明字腔保持透明。
-应用中的下划线独立绘制，以保留入场和刷新动画。
+2.1.32-dev（versionCode 57）。首页按左侧设备标题、下方状态点与 MAC、右侧整数亮度排版。
+设备标题使用 Manrope Light 300，MAC 与地址使用 Jost Light 300，亮度使用
+Outfit ExtraLight 200；三种字体均附带 OFL 许可，不需要在线下载字体。
+
+`Open Rhodes` 字标由用户提供的 `artwork/openrhodes-source.png` 整体描摹，
+保留输入图片中的字距与字形比例。`artwork/openrhodes-wordmark.svg` 与原生 vector
+共用轮廓；`python tools/build_wordmark.py` 可重新生成，工具依赖 Pillow、NumPy、
+OpenCV 与 Matplotlib。字标来源说明随源码和 APK 保留，界面开源字体的 OFL
+授权不适用于这幅独立字标美术素材。
+
+字标高光仅向右扫描；刷新下划线为每程 2.4 秒。下划线与字标分层，保留亮、暗、亮的
+入场顺序、跟手下拉及页底署名。此版本用于开发协作测试，继续使用现有 Debug 签名。
 
 ## 构建
 

@@ -1,0 +1,26 @@
+[
+  {
+    "family": "manrope",
+    "weight": 300,
+    "source": "https://github.com/google/fonts/tree/main/ofl/manrope",
+    "source_sha256": "3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6",
+    "output_sha256": "649debc74815d44fef834bf176a9024f8613b020777cfd5ebeed4db44c66e1e7",
+    "license": "SIL Open Font License 1.1"
+  },
+  {
+    "family": "jost",
+    "weight": 300,
+    "source": "https://github.com/google/fonts/tree/main/ofl/jost",
+    "source_sha256": "6343b70971000b04c5d401c96ae08ce371086135e999d5e1e1413039c0213076",
+    "output_sha256": "3741748f38d346e7cf69376d99a4e9063a181a3b7a1a17ac3fd21e854120fca2",
+    "license": "SIL Open Font License 1.1"
+  },
+  {
+    "family": "outfit",
+    "weight": 200,
+    "source": "https://github.com/google/fonts/tree/main/ofl/outfit",
+    "source_sha256": "fc7287273e66929776e2ba54f144fe699080bec29f61bf649d70d871468aeade",
+    "output_sha256": "ae98f73e7fae1413b204349461413c2a053574f86d6f4a5537f4079a3c36be3f",
+    "license": "SIL Open Font License 1.1"
+  }
+]

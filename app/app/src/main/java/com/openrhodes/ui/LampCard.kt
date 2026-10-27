@@ -253,7 +253,8 @@ fun LampCard(
                     TextStyle(
                         brush = ink,
                         fontSize = normalSize.sp,
-                        fontWeight = FontWeight.Light,
+                        fontFamily = BrightnessFont,
+                        fontWeight = FontWeight.ExtraLight,
                         fontFeatureSettings = "tnum",
                     )
                 Text(

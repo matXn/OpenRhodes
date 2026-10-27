@@ -105,8 +105,10 @@ class RootVisualTest {
                 (headingBounds.top + WordmarkGeometry.OTop * unit).toInt() until
                     (headingBounds.top + WordmarkGeometry.OBottom * unit).toInt()) {
                 for (x in
-                    headingBounds.left.toInt() until
-                        (headingBounds.left + WordmarkGeometry.OWidth * unit).toInt()) {
+                    (headingBounds.left + WordmarkGeometry.OLeft * unit).toInt() until
+                        (headingBounds.left +
+                                (WordmarkGeometry.OLeft + WordmarkGeometry.OWidth) * unit)
+                            .toInt()) {
                     if (isInk(x, y)) oPixels.add(x to y)
                 }
             }
@@ -117,7 +119,7 @@ class RootVisualTest {
                 oHeight * WordmarkGeometry.OWidth /
                     (WordmarkGeometry.OBottom - WordmarkGeometry.OTop),
                 oWidth.toFloat(),
-                2f,
+                3f,
             )
             val ruleLeft = headingBounds.left.toInt() + 2
             val ruleRight = headingBounds.right.toInt() - 2
@@ -134,14 +136,19 @@ class RootVisualTest {
             val pRight = (headingBounds.left + WordmarkGeometry.OpenEnd * unit).toInt()
             val joinedColumns =
                 (pLeft until pRight).count { x ->
-                    ((baseline + 1).toInt()..requireNotNull(ruleY)).all { y -> isInk(x, y) }
+                    // 分数像素缩放后，接缝允许一个抗锯齿像素，不能形成可见间隙。
+                    ((baseline + 1).toInt()..requireNotNull(ruleY)).count { y ->
+                        android.graphics.Color.red(homeImage.getPixel(x, y)) < 70
+                    } <= 1
                 }
             assertTrue("Underline is detached from the p descender", joinedColumns >= 2)
             val spaceX =
                 (headingBounds.left +
                         (WordmarkGeometry.OpenEnd + WordmarkGeometry.RhodesStart) * .5f * unit)
                     .toInt()
-            for (y in headingBounds.top.toInt() until (headingBounds.top + 80f * unit).toInt()) {
+            for (y in
+                headingBounds.top.toInt() until
+                    (headingBounds.top + (WordmarkGeometry.Baseline + 8f) * unit).toInt()) {
                 assertEquals(
                     "Open 与 Rhodes 之间应有清晰空格",
                     android.graphics.Color.BLACK,
@@ -163,7 +170,26 @@ class RootVisualTest {
                 2f,
             )
             compose.onNodeWithText("本地灯具").assertDoesNotExist()
-            compose.onNodeWithText("#02:00:00:00:00:10").assertIsDisplayed()
+            compose.onNodeWithText("Mac:02:00:00:00:00:10").assertIsDisplayed()
+            val deviceBounds =
+                compose
+                    .onNodeWithText(name, useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val macBounds =
+                compose
+                    .onNodeWithText("Mac:02:00:00:00:00:10", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val levelBounds =
+                compose
+                    .onNodeWithText("56%", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            assertTrue("状态点和 MAC 应在设备名下方", macBounds.top >= deviceBounds.bottom)
+            assertTrue("亮度应位于设备信息右侧", levelBounds.left >= deviceBounds.right)
+            assertTrue("亮度不能越过页面右侧边距", levelBounds.right <= (viewportWidth - 19) * 2f)
+
             compose.onNodeWithText("未连接 · 点开恢复连接").assertDoesNotExist()
             compose.onNodeWithText("等待连接").assertDoesNotExist()
             compose.onNodeWithText("离线").assertDoesNotExist()
@@ -321,7 +347,9 @@ class RootVisualTest {
             fun glintCenter(image: Bitmap): Float {
                 var sum = 0L
                 var count = 0
-                for (py in bounds.top.toInt() until (bounds.top + 80f * unit).toInt()) {
+                for (py in
+                    bounds.top.toInt() until
+                        (bounds.top + (WordmarkGeometry.Baseline + 8f) * unit).toInt()) {
                     for (px in left until right) {
                         val color = image.getPixel(px, py)
                         if (
