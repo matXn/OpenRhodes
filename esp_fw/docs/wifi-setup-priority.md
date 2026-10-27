@@ -1,39 +1,30 @@
-# Wi-Fi setup priority
+# Wi-Fi 配网优先级
 
-Automatic startup/reconnect now first performs one asynchronous all-channel
-scan. It tries visible saved SSIDs in saved priority order, using the strongest
-observed channel for each SSID. Unseen SSIDs remain fallback candidates for
-hidden networks or missed scans. A NO_AP_FOUND event ends an automatic attempt
-after at least 1.5 seconds rather than waiting out the full 25-second timeout.
-User-selected connection requests retain the existing timeout and take priority.
+启动与自动重连现在先做一次异步全信道扫描。它按已保存的优先级顺序尝试**可见**的
+已保存 SSID，并为每个 SSID 使用扫描观测到的最强信道。扫描中未出现的 SSID 保留为
+兜底候选，用于隐藏网络或扫描遗漏的情况。`NO_AP_FOUND` 事件会在至少 1.5 秒后结束
+一次自动尝试，而不是等满 25 秒的超时。用户主动发起的连接请求保留原有超时，并优先处理。
 
-The scan is shared with the setup page if the user opens it in flight; doing
-so suppresses automatic selection. Credentials and saved priority are unchanged.
-Scans and association remain serialized, including cancellation-event draining.
+如果用户在一次扫描进行中打开配网页，配网页会共享这次扫描；这样做会抑制自动选择。
+凭据与已保存的优先级保持不变。扫描与关联始终保持串行，包括取消事件的排空。
 
-The setup page owns foreground radio activity. Opening `/setup` pauses an
-unfinished automatic saved-network connection immediately, keeping the AP and
-HTTP server running. A healthy existing STA connection is retained for background
-scanning. An explicit scan interrupts an unfinished connection; an explicit
-network submission cancels any scan and schedules the selected network next.
+配网页持有前台无线电活动。打开 `/setup` 会立即暂停未完成的自动保存网络连接，
+同时保持 AP 与 HTTP 服务器继续运行。健康的既有 STA 连接会保留，供后台扫描使用。
+显式扫描会中断未完成的连接；显式提交网络会取消任何扫描，并把所选网络排到下一个。
 
-`POST /api/wifi/setup` with `action=hold` renews a 45-second setup lease. The
-visible page renews it every 10 seconds; `action=release` releases it on page
-hide/close. A lost page expires naturally. Saved-network retry rounds cannot
-start while the lease or a scan owns the radio. An explicit connection attempt
-continues while the page heartbeat is running.
+`POST /api/wifi/setup` 携带 `action=hold` 会续期 45 秒的配网租约。可见页面每 10 秒
+续期一次；页面隐藏/关闭时用 `action=release` 释放。页面失联则租约自然过期。
+只要租约或扫描占用着无线电，已保存网络的重试轮次就无法开始。
+显式连接尝试在页面心跳期间仍会继续。
 
-Cancellation drains the previous scan completion before the next association or
-scan. A transient `ESP_ERR_WIFI_STATE` while the station is disconnecting is
-retried for a bounded interval, not reported as a successful empty scan. Last
-successful scan results remain cached if a later scan fails.
+取消操作会先排空上一次扫描的完成事件，再进入下一次关联或扫描。
+站点正在断开时出现的瞬时 `ESP_ERR_WIFI_STATE` 会在有限区间内重试，
+而不会被误报成一次成功的空扫描。若后续扫描失败，最近一次成功的扫描结果仍会保留。
 
-The page starts scanning automatically when not connected. It allows selecting
-a new network while an old one is connecting, invalidates old scan UI work when
-submitting a connection, and ignores late scan responses. Failed scans preserve
-the previous visible SSID list.
+未连接时页面会自动开始扫描。它允许在旧网络仍在连接时选择新网络，
+在提交连接时作废旧扫描的界面工作，并忽略迟到的扫描响应。
+扫描失败时保留此前可见的 SSID 列表。
 
-Only a successful connection persists credentials. A manually selected network
-is moved to priority 1 on success, including updates to an existing profile;
-automatic reconnects preserve the chosen order. The eight-profile capacity and
-existing NVS storage format are unchanged.
+只有成功连接才会持久化凭据。手动选择的网络在成功后会被移到优先级 1，
+包括对既有配置的更新；自动重连则保持用户选定的顺序。
+八配置容量与既有 NVS 存储格式保持不变。

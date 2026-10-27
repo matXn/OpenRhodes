@@ -1,15 +1,12 @@
-# Hardware identity and mDNS verification
+# 硬件身份与 mDNS 验证
 
-The ESP32 exposes the full station MAC and `rhodes-<12 hex digits>` identity
-through `/api/state`. The AP and station share this logical identity; IP
-addresses and Wi-Fi names are not device identities.
+ESP32 通过 `/api/state` 暴露完整的站点 MAC 与 `rhodes-<12 hex digits>` 身份（后缀为 12 位十六进制数字）。
+AP 与站点共用这个逻辑身份；IP 地址和 Wi-Fi 名称都不是设备身份。
 
-mDNS runs in the ESP-IDF task. The application starts it on the AP even before
-station association, retries initialization/service failures every two seconds,
-and restarts the responder when the station address changes. The HTTP service
-uses an instance name containing the MAC suffix, with full `mac`, `device_id`
-and `model` TXT entries. The hostname remains `rhodeslight.local`.
+mDNS 运行在 ESP-IDF 任务中。应用在站点关联之前就先在 AP 上启动它，
+每两秒重试一次初始化或服务失败，并在站点地址变化时重启响应器。
+HTTP 服务的实例名包含 MAC 后缀，TXT 记录包含完整的 `mac`、`device_id` 与 `model`。
+主机名保持 `rhodeslight.local`。
 
-Android NSD discovers and resolves services; application status polling uses
-HTTP separately. Increasing HTTP polling frequency does not change mDNS query
-timing or bypass network multicast filtering.
+Android NSD 负责发现与解析服务；应用状态轮询则单独走 HTTP。
+提高 HTTP 轮询频率不会改变 mDNS 查询时序，也不会绕过网络的组播过滤。

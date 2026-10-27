@@ -1,10 +1,16 @@
 #pragma once
+#include <Arduino.h>            // 先引入 FreeRTOS.h；队列/信号量头要求它在前面
+#include <WiFi.h>               // bleCompactState() 读 WiFi.status()/localIP()
 #include <protocomm.h>
 #include <protocomm_ble.h>
 #include <protocomm_security1.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include "ble_provision_protocol.h"
+// 显式声明本 module 依赖的 interface。此前缺这几行，能编译完全依赖 main.cpp 的 include 顺序。
+#include "board_config.h"
+#include "http_control.h"
+#include "light_contract.h"
 
 constexpr uint32_t BLE_SETUP_WINDOW_MS=300000;
 protocomm_t* bleProvision=nullptr;

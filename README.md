@@ -1,105 +1,98 @@
-# OpenRhodes
+<div align="center">
+  <img src="docs/assets/readme-hero.svg" alt="OpenRhodes 项目封面：深色背景中的暖光灯具插画" width="100%" />
 
-> **当前 ESP32-S3 固件源码已整理至 [`esp_fw/`](esp_fw/)。**
-> 请在该目录构建、修改与测试；仓库根目录的早期固件文件仅保留为历史基线。
+  **让光，随触碰与节奏自然变化。**
 
-ESP32-S3 装饰灯固件的团队开发仓库。
+  基于 ESP32-S3 的触摸灯固件，集成本地交互、无线配网与网页控制。
 
-**当前用于协作开发和硬件联调，不作为最终用户分发渠道。** 暂不提供发布版、预编译固件或安装包；功能、接口和参数仍会调整。
+  [快速开始](#快速开始) · [功能概览](#功能概览) · [硬件与接口](#硬件与接口) · [文档导航](#文档导航) · [参与协作](#参与协作)
+</div>
 
-## 仓库范围
+---
 
-包含 ESP32-S3 固件、设备内嵌网页源码和网页构建脚本。PCB、原理图、网表、Gerber、制造文件及本地调试记录不纳入仓库。
+> **项目状态：开发与硬件联调阶段。** 本仓库面向团队协作，暂不提供面向最终用户的发布版、预编译固件或安装包。功能、接口和参数仍可能调整。
 
-## 目录
+## 功能概览
+
+| | 能力 | 说明 |
+| :--- | :--- | :--- |
+| **01** | 触摸调光 | 通过电容触摸条进行本地操作，支持滑动调节亮度。 |
+| **02** | 灯光效果 | 支持平滑渐变和呼吸效果，呼吸周期、下限与曲线可调。 |
+| **03** | 无线配网 | 支持热点网页和蓝牙低功耗（BLE）配网，保存多组 Wi-Fi 配置。 |
+| **04** | 网页控制 | 通过设备内嵌网页或 HTTP 接口读取状态、调节灯光及管理配网。 |
+| **05** | 设备发现 | 支持 mDNS 和基于站点 MAC 的设备标识；实际发现能力取决于网络环境。 |
+
+## 网页控制演示
+
+| 网页滑动调光 | 网页呼吸模式 |
+| :---: | :---: |
+| ![设备网页滑动调光实录](docs/assets/readme-web-dimming.gif) | ![设备网页呼吸模式实录](docs/assets/readme-web-breathing.gif) |
+| 在灯面上滑动，调整亮度 | 切换呼吸模式，查看波形与参数 |
+
+<sub>以上为连接设备的 Web 页面操作录屏，并非实体灯具的实拍画面；实际灯光效果以设备表现为准。</sub>
+
+## 快速开始
+
+**前置条件：** Python 3 和 PlatformIO Core，或安装了 PlatformIO 扩展的 VS Code。
+
+```sh
+# 从仓库根目录进入当前固件项目
+cd esp_fw
+
+# 构建；构建前钩子会自动生成网页资源
+pio run
+```
+
+普通构建不会烧录或重置设备。需要上传固件时，先确认连接的开发板和串口，再参考 [构建与烧录](esp_fw/README.md#构建与烧录)。
+
+> **请从 `esp_fw/` 构建当前固件。** 仓库根目录的 `platformio.ini`、`src/`、`web/` 和 `tools/` 是早期固件的历史基线；在根目录构建得到的不是当前固件。
+
+## 硬件与接口
+
+| 项目 | 当前配置 |
+| :--- | :--- |
+| 开发平台 | ESP32-S3；PlatformIO `espressif32@6.13.0` |
+| 触摸输入 | GPIO1–GPIO10 电容触摸通道 |
+| 灯光输出 | GPIO17 控制电源轨；GPIO18 控制高边 PMOS 反相 PWM |
+| 输出参数 | PWM 19 kHz、12 bit；物理占空比上限 80% |
+| 网络入口 | 配网热点、局域网网页 / HTTP，以及 BLE 配网 |
+
+硬件接线、构建配置、默认参数与完整接口表以 [固件说明](esp_fw/README.md) 和源码为准。网络控制接口目前使用显式请求头检查，**该检查不是用户身份认证**；详细安全边界见 [配网和控制](esp_fw/README.md#配网和控制)。
+
+## 仓库结构
 
 ```text
-src/main.cpp          触摸、PWM、灯光状态与呼吸效果
-src/http_control.h    HTTP API、Wi-Fi 配网与常驻 AP
-web/                  当前网页及开场素材源码
-  index.html
-  control.js
-  portal.html
-  splash.html
-tools/build_web.py    生成固件需要的网页资源头文件
-platformio.ini        平台、目标板及构建配置
+OpenRhodes/
+├── esp_fw/                 当前固件项目
+│   ├── src/                固件源码与第三方组件
+│   ├── web/                设备内嵌网页源码
+│   ├── test/               主机、网页模拟与可选设备测试
+│   ├── tools/              网页资源生成与构建钩子
+│   └── docs/               配网协议与技术说明
+├── docs/                   项目领域决策与 Agent 配置
+├── src/、web/、tools/      早期固件的历史基线
+└── platformio.ini          早期固件的构建配置
 ```
 
-`src/control_page.h`、`src/portal_page.h`、`src/splash_asset.h`、`src/splash.html` 是生成文件，不提交。修改网页请改 `web/` 后重新生成。
+## 文档导航
 
-## 本地开发
+| 我想了解 | 从这里开始 |
+| :--- | :--- |
+| 构建、烧录、测试与完整 API | [固件开发说明](esp_fw/README.md) |
+| BLE 配网协议与安全边界 | [蓝牙配网](esp_fw/docs/bluetooth-provisioning.md) |
+| 配网优先级、扫描与重连 | [Wi-Fi 配网优先级](esp_fw/docs/wifi-setup-priority.md) |
+| 热点可见性与设备发现 | [隐藏配网热点](esp_fw/docs/hidden-setup-ap.md) · [设备身份与 mDNS](esp_fw/docs/mdns-identity.md) |
+| 项目术语与架构记录 | [领域模型](CONTEXT.md) · [架构决策](docs/adr/) |
+| Agent 协作约定 | [AGENTS.md](AGENTS.md) |
 
-需要 Python 3、PlatformIO Core，或 VS Code 的 PlatformIO 扩展。当前平台锁定为 `espressif32@6.13.0`，使用 Arduino ESP32 core 2.x。
+## 参与协作
 
-```sh
-python -m pip install platformio
-python tools/build_web.py
-pio run
-```
+从 `main` 创建功能分支，完成后提交 Pull Request。涉及触摸手感、引脚、电源或网络状态机时，请记录硬件版本、测试方式及尚未验证的部分；网页模拟和主机测试不能代替上板验证。
 
-烧录时先生成网页，再指定自己的串口：
+提交前的检查方式见 [固件验证说明](esp_fw/README.md#验证)。请勿提交 `.pio/`、生成的资源头文件、个人密钥、Wi-Fi 凭据、设备调试记录或历史备份。
 
-```sh
-python tools/build_web.py
-pio run -t upload --upload-port COM22
-pio device monitor --port COM22
-```
+## 仓库范围与许可
 
-`COM22` 只是示例。Linux/macOS 使用自己的串口路径。烧录前释放占用该端口的串口监视器。
+本仓库包含固件、设备内嵌网页源码和网页构建脚本，不包含 PCB、原理图、网表、Gerber、制造文件或本地调试记录。
 
-若安装了 Node.js，可额外检查网页脚本语法：
-
-```sh
-node --check web/control.js
-```
-
-固件不依赖仓库中的 Wi-Fi 账号密码文件。通过设备页面配网，成功连接的凭据保存在设备 NVS 中，不上传 GitHub。
-
-## 当前硬件假设
-
-- ESP32-S3，当前配置为 10 个电容触摸通道，GPIO1–GPIO10。
-- GPIO17：LED 电源轨使能；GPIO18：高边 PMOS 的反相 PWM。
-- 14-bit LEDC；逻辑最大输出限制为硬件满量程的一半。
-- 当前构建使用 4 MB flash 布局（`min_spiffs.csv`）。已测试的模组实际为 8 MB；这项兼容配置保留，修改分区前请和实际硬件核对。
-
-这些是固件的接线前提，不是 PCB 设计文件。
-
-## HTTP 与 Wi-Fi
-
-- 常驻 AP：`RhodesLight-Setup`。
-- 开发用默认 AP 密码：`RhodesLight`。这是源码中的通用默认值，不是家庭 Wi-Fi 密码。
-- AP 地址：`http://192.168.4.1/`；系统登录入口为 `/portal`。
-- 连入家庭 Wi-Fi 后可通过设备获得的局域网 IP 访问，AP 继续保留。
-- 传感器权限、系统 Wi-Fi 登录窗口与完整浏览器的行为可能不同；原生陀螺仪通常需要安全上下文。
-
-主要接口：
-
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| GET | `/api/state` | 灯光与网络状态 |
-| POST | `/api/light` | `brightness=0..100`、`on=0/1` |
-| POST | `/api/mode` | `mode=breathing/steady` |
-| GET / POST | `/api/scan` | 查询 / 启动 Wi-Fi 扫描 |
-| POST | `/api/wifi` | 提交 `ssid` 和 `password` |
-
-写入接口要求 `X-Rhodes-Control: 1`，参数使用 `application/x-www-form-urlencoded`。具体行为以 `src/http_control.h` 为准，接口暂未承诺稳定兼容。
-
-网页和固件正处于迭代中，`web/` 与生成后的设备页面可能和旧截图、历史测试不同。合并改动前请重新构建并实际验证。
-
-## 协作方式
-
-从 `main` 建功能分支，完成后提交 Pull Request。涉及触摸手感、引脚、电源或网络状态机时，请在 PR 中记录硬件版本、测试方式和仍未验证的部分；不要只用网页模拟结果代替上板验证。
-
-提交前建议运行：
-
-```sh
-python tools/build_web.py
-node --check web/control.js
-pio run
-```
-
-不要提交 `.pio/`、生成的资源头文件、个人密钥、Wi-Fi 凭据、抓取的设备状态或历史备份。仓库不自动生成 Release，也不上传编译产物。
-
-## 许可与素材
-
-团队尚未选定软件许可证，本次不自动添加开源许可证。开场页面包含项目提供的《明日方舟》相关第三方素材；其来源与后续处理需由团队确认，不代表本项目拥有这些素材或授予其使用许可。
+团队尚未为自有代码选定统一软件许可证。第三方组件保留各自的许可及说明；开场页面包含《明日方舟》相关第三方素材，其来源与后续处理仍需团队确认。本仓库不代表对这些素材的使用授权。

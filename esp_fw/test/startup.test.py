@@ -8,6 +8,9 @@ import subprocess
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/main.cpp').read_text(encoding='utf-8-sig')
+# 板级常量已移到 board_config.h；本测试按宏回读它们，需要两个文件拼在一起找。
+constants = (root / 'src/board_config.h').read_text(encoding='utf-8-sig')
+source_with_constants = source + '\n' + constants
 
 
 def function(signature):
@@ -57,14 +60,14 @@ uint32_t readTouchPad(int pin){
 }
 '''
 import re
-resolution = int(re.search(r'#define PWM_RES\s+(\d+)', source)[1])
-limit = int(re.search(r'#define PWM_OUTPUT_LIMIT_PERCENT\s+(\d+)', source)[1])
+resolution = int(re.search(r'#define PWM_RES\s+(\d+)', source_with_constants)[1])
+limit = int(re.search(r'#define PWM_OUTPUT_LIMIT_PERCENT\s+(\d+)', source_with_constants)[1])
 code = code.replace(
     'constexpr int PWM_MIN=0, PWM_MAX_DUTY=2048, REMOTE_FADE_MS=400, PWM_RES=12;',
     f'constexpr int PWM_MIN=0, PWM_RES={resolution}, PWM_FULL_DUTY=1<<PWM_RES, '
     f'PWM_OUTPUT_LIMIT_PERCENT={limit}, '
     'PWM_MAX_DUTY=PWM_FULL_DUTY*PWM_OUTPUT_LIMIT_PERCENT/100, REMOTE_FADE_MS=400;')
-duration = re.search(r'#define STARTUP_FADE_MS\s+(\d+)', source)[1]
+duration = re.search(r'#define STARTUP_FADE_MS\s+(\d+)', source_with_constants)[1]
 code += f'constexpr uint32_t STARTUP_FADE_MS={duration};\n'
 code += fade_globals
 for signature in ('void startRemoteFade(', 'void serviceRemoteFade()',

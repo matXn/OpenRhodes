@@ -7,8 +7,12 @@ ESP32-S3 灯箱固件，供队友协作开发与硬件联调。此目录是当�
 
 ```text
 platformio.ini       PlatformIO 平台、分区与编译参数
-src/main.cpp         触摸、PWM、渐亮与呼吸效果
-src/http_control.h   HTTP API、常驻 AP、mDNS 与配网状态机
+src/board_config.h   板级常量：PWM/电源轨/亮度范围/AP 名，零依赖
+src/light_contract.h 灯光 module 的 interface（状态与函数声明）
+src/http_control.h   HTTP/配网 module 的 interface（状态与入口声明）
+src/http_control.cpp HTTP/配网 module 的实现，唯一包含生成页面资源的翻译单元
+src/ble_contract.h   蓝牙配网 module 的 interface
+src/main.cpp         触摸手势、校准、串口 TUI 与模块编排
 src/wifi_*.h         Wi-Fi 配置存储、优先级、自动连接
 src/ble_provision*   蓝牙配网服务与协议
 src/vendor/          修复 ATT 分片读取的 Espressif transport 及原始许可
@@ -17,6 +21,10 @@ tools/              网页打包与 PlatformIO 构建前钩子
 test/               主机回归、网页模拟与可选真实 BLE 检查
 docs/               配网协议及设计说明
 ```
+
+HTTP 实现位于 `http_control.cpp`；跨文件使用的状态和函数通过相关头文件声明。
+生成的页面资源在该实现文件中引用。若其他翻译单元也引用这些资源，可能造成重复占用 Flash；
+拆分相关代码时应检查构建结果。
 
 ## 构建与烧录
 
@@ -43,7 +51,7 @@ pio device monitor --port COM_PORT
 
 - GPIO1–10：电容触摸焊盘；GPIO17：PW2053 电源使能；GPIO18：高边 PMOS 反相 PWM。
 - PWM 19 kHz / 12 bit；物理占空比上限 80%，客户端仍使用 0–100% 范围。
-- 保留开机渐亮、触摸校准、亮度/模式保存。
+- 保留开机渐亮、触摸校准，并保存开关状态、亮度和呼吸参数；当前呼吸模式不持久化。
 - 新配置的呼吸默认值：周期 6.8s，最暗 13%，曲线 0.60；已有 NVS 参数保留。
 - 最多保存 8 个 Wi-Fi；成功手动连接的新网络提升为优先级 1。
 - 蓝牙配网开启至少 5 分钟；安全请求续期，未保存成功网络时保持开启。

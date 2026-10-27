@@ -1,21 +1,19 @@
-# Packaging verification — 2026-10-27
+# 打包验证 — 2026-10-27
 
-Source baseline: current local OpenRhodes-breath-wifi workspace, including its
-uncommitted BLE/Wi-Fi/startup improvements, packaged into esp_fw.
-Runtime src/ and web/ files were compared byte-for-byte with that baseline.
-No hardware was flashed or reset for this packaging task.
+源码基线：当时本地的 OpenRhodes-breath-wifi 工作区，包含其中未提交的
+BLE / Wi-Fi / 启动相关改进，打包进 `esp_fw/`。
+运行时 `src/` 与 `web/` 文件已与该基线逐字节比对。
+本次打包任务没有烧录或复位任何硬件。
 
-- Clean-directory PlatformIO build passed with automatic web generation.
-- RAM: 70,676 / 327,680 bytes; flash: 1,737,521 / 1,966,080 bytes.
-- JavaScript syntax checks passed for web/control.js and web/setup.js.
-- Existing MSVC host tests passed: startup fade/calibration, Wi-Fi setup and
-  visible-first priorities, AP visibility/NVS rollback, BLE request frames,
-  interrupted/reconnected/long/repeated ATT reads.
-- Browser integration tests and physical radio/touch tests were not repeated;
-  runtime firmware and web source were not changed by this reorganization.
-- Generated embedded headers, host harnesses, preview output, .pio artifacts,
-  local device logs and PCB/manufacturing files are excluded from Git.
-- Vendored Espressif transport license and change notices are retained.
+- 干净目录下的 PlatformIO 构建通过，网页资源自动生成。
+- RAM：70,676 / 327,680 字节；Flash：1,737,521 / 1,966,080 字节。
+- `web/control.js` 与 `web/setup.js` 的 JavaScript 语法检查通过。
+- 既有 MSVC 主机测试通过：启动渐亮/校准、Wi-Fi 配网与可见优先的优先级、
+  AP 可见性/NVS 回滚、BLE 请求帧、以及中断/重连/超长/重复的 ATT 读取。
+- 浏览器集成测试与真实射频/触摸测试未重复执行；
+  本次目录整理没有改动运行时固件与网页源码。
+- 生成的嵌入式头文件、主机测试夹具、预览输出、`.pio` 产物、
+  本地设备日志与 PCB/制造文件均排除在 Git 之外。
+- 保留 vendored Espressif transport 的许可证与改动说明。
 
-The original root-level firmware tree remains as a historical baseline. Current
-firmware development/build instructions are in esp_fw/README.md.
+原始根目录固件树保留为历史基线。当前的固件开发与构建说明在 `esp_fw/README.md`。

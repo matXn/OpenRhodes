@@ -10,53 +10,10 @@
 #include <WiFi.h>
 
 
-// ===== PWM / PMOS 输出配置 =====
-// IO18 通过 220R 接 AO3401A 的 Gate，AO3401A 是高边 PMOS。
-// PMOS 的 Source 接 3V/3V3，Drain 接 LED 正极 L+。
-// 因此 IO18 的逻辑和常见低边 NMOS 相反：
-//   - IO18 = HIGH：Gate 接近 Source，Vgs≈0，PMOS 关闭，灯灭。
-//   - IO18 = LOW ：Gate 被拉低，Vgs 为负，PMOS 导通，灯亮。
-// LEDC 写入的是“raw duty”，这里用 PWM_ACTIVE_LOW 统一做反相，业务层只处理“逻辑亮度”。
-#define PWM_PIN     18
-#define PWM_CH      0
-// 19kHz / 12-bit 需要至少 77.824MHz：setup 显式选择 80MHz APB。
-#define PWM_FREQ    19000
-#define PWM_RES     12
-#define PWM_ACTIVE_LOW true
-
-// ===== PW2053 使能 / LED 供电轨 =====
-// IO17 接 PW2053 的 EN 脚，控制 LED 那条 3V 轨（PMOS 的 Source 就挂在这条轨上）。
-// 硬件上 PW2053 的 EN 没有任何上下拉，上电后到固件驱动它之前 IO17 是高阻，
-// 这条轨的状态是未定义的。所以必须在 setup() 最早期就显式驱动 IO17。
-#define RAIL_EN_PIN   17
-// false：轨常开。行为最简单可预测，首次点板用这个。
-// true ：关灯时同时关断 PW2053。省掉待机功耗，更重要的是待机时
-//        触摸焊盘旁边少一个开关电源在跑，触摸噪声更低。确认灯正常后再打开。
-#define RAIL_POWER_GATING false
-// PW2053 软启动时间。使能后等这么久再让 PMOS 导通，避免轨还没建立就拉负载。
-#define RAIL_SETTLE_MS 5
-
-// ===== 亮度范围 =====
-// PWM_RES=12 时，硬件计数范围是 0..4095。
-// 将最大物理 PWM 占空比限制为 80%；App 的 0..100% 映射到这个允许范围。
-#define NUM_PADS    10
-#define PWM_MIN     0
-// 滑到这个值以下就直接归零关灯。低于 163 的逻辑亮度经 gamma 后一律输出 duty=1，
-// 彼此在视觉上无法区分，所以在这里截断不会损失任何可用档位，
-// 却能保证滑到底部时真的关灯，而不是停在 0.3% 这种“显示 0% 但还亮着”的状态。
-#define BRIGHTNESS_OFF_FLOOR (PWM_MAX_DUTY / 100)
-// ESP32 LEDC 在 N 位分辨率下占空比范围是 0 ~ 2^N，要输出 100% 必须写 2^N。
-// 写 2^N-1 只有 99.994%，active-low 时关灯会残留 1 个 LSB 的低电平脉冲，PMOS 微导通。
-#define PWM_FULL_DUTY (1 << PWM_RES)
-#define PWM_OUTPUT_LIMIT_PERCENT 80
-#define PWM_MAX_DUTY (PWM_FULL_DUTY * PWM_OUTPUT_LIMIT_PERCENT / 100)
-#define FADE_STEP_DUTY ((PWM_MAX_DUTY / 128) > 1 ? (PWM_MAX_DUTY / 128) : 1)
-// 人眼感知亮度曲线。
-// HomeKit 和触摸保存的是线性的“逻辑亮度”，真正输出到 PWM 前再做 gamma 映射。
-// gamma 越高，低亮度段占用的逻辑区间越大，肉眼看起来暗部变化会更细。
-// 3.9 远超人眼感知曲线（约 2.2），把低亮度段压没了。改成 2.2 后 1%~13% 段内
-// 可分辨档位从 1 个变成 92 个。注意：最暗档不会因此变亮，gamma 只决定行程怎么分配。
-#define PWM_GAMMA    2.2f
+#include "board_config.h"
+#include "light_contract.h"
+#include "http_control.h"
+#include "ble_provision.h"
 
 // ===== 触摸手势参数 =====
 // 触摸滑动按 IO1..IO10 的焊盘序号变化量计算。
@@ -211,8 +168,7 @@
 // S3 上触摸通道号和 GPIO 号一致（GPIO1 = TOUCH1），所以可以直接转成 touch_pad_t。
 const int TOUCH_PINS[NUM_PADS] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
-// WiFiManager 配网 AP 名称；未连接到已保存 WiFi 时会广播这个热点。
-const char* CONFIG_AP_NAME          = "RhodesLight-Setup";
+// CONFIG_AP_NAME 定义在 board_config.h（HTTP module 也要用）。
 // HomeKit 配对码实际传给 HomeSpan 需要 8 位数字；iOS 显示时会自动分组。
 const char* HOMEKIT_SETUP_CODE      = "00000000"; // 未使用的旧 HomeKit 占位值
 // 下面几个开关只用于调试/一次性清理，默认都关闭，避免正常烧录后反复清空状态。
@@ -224,7 +180,7 @@ const bool FIXED_PWM_TEST           = false;
 // 之间切换。每个相位 5 秒，万用表能稳定读数，两种状态都能测到。
 // 测完务必改回 false。
 const bool LED_DC_TEST              = false;
-const bool DISABLE_NETWORK_TEST     = false;
+// DISABLE_NETWORK_TEST 定义在 board_config.h（HTTP module 也要读它）。
 // TUI 仪表盘：用 ANSI 转义序列原地刷新，不滚屏。开启后关掉所有零散的行式日志，
 // 否则它们会插进来把画面冲乱。需要看原始流水日志时把它改成 false。
 const bool SERIAL_TUI               = true;
@@ -284,22 +240,10 @@ uint32_t lastSlideDebugMs = 0;
 bool shouldSaveConfig = false;
 // HomeSpan 只能 begin 一次；homeKitReady 用来避免重复创建 HomeKit accessory。
 bool homeKitReady = false;
-// WiFiManager portal 是否正在运行。非阻塞 portal 需要在 loop 里持续 process。
-bool wifiManagerActive = false;
-uint32_t wifiConnectStartMs = 0;
+// wifiManagerActive / wifiConnectStartMs 现由 http_control.cpp 拥有（见 http_control.h 的 extern 声明）。
 
-// 网络状态机：
-// NET_CONNECTING：尝试连接已保存 WiFi。
-// NET_PORTAL：连接失败后打开 RhodesLight-Setup 配网热点和 192.168.4.1 配网页面。
-// NET_CONNECTED：WiFi 已连上，启动并轮询 HomeKit。
-enum NetworkState {
-  NET_OFF,
-  NET_CONNECTING,
-  NET_PORTAL,
-  NET_CONNECTED
-};
-
-NetworkState networkState = NET_OFF;
+// NetworkState 枚举与 networkState 定义已移到 http_control.cpp；
+// 本文件通过 light_contract.h / http_control.h 使用它们。
 
 // 呼吸函数参数（网页可调，存 NVS）：
 // 一个周期内 w = (0.5 + 0.5·cos φ)^(curve/100)，输出 = brightness·(floor + (1-floor)·w)
@@ -620,7 +564,7 @@ uint32_t remoteFadeStartedMs = 0, remoteFadeDurationMs = 0;
 int remoteFadeFrom = 0;
 
 // 启动渐变（手机端调节用）。目标由当前的 ledOn / brightness 决定。
-void startRemoteFade(uint32_t durationMs = 0) {
+void startRemoteFade(uint32_t durationMs) {
   breathingActive = false;
   remoteFadeActive = true;
   remoteFadeLastMs = millis();
@@ -787,8 +731,6 @@ void syncHomeKitState(bool force = false);
 // HTTP 页面按需读取当前状态，不再依赖 HomeKit 通知。
 void syncHomeKitState(bool force) { (void)force; }
 void clearHomeKitPairingFromTouch() {}  // 旧长按入口已禁用，不清除任何配对或 Wi-Fi 数据。
-#include "http_control.h"
-#include "ble_provision.h"
 
 // 读取 10 个触摸焊盘并计算触摸中心位置 centroid。
 // 返回值约为 0..9；没有确认触摸时返回 -1，并缓慢更新 baseline。

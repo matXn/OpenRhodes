@@ -3,7 +3,8 @@ from pathlib import Path
 import subprocess
 
 root = Path(__file__).resolve().parents[1]
-source = (root / 'src/http_control.h').read_text(encoding='utf-8-sig')
+# setSetupApHidden() 的实现已移到 http_control.cpp（头文件只留声明），切片要跟着走。
+source = (root / 'src/http_control.cpp').read_text(encoding='utf-8-sig')
 start = source.index('bool setSetupApHidden(')
 brace = source.index('{', start)
 depth, end = 1, brace + 1
