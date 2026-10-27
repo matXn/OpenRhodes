@@ -293,7 +293,59 @@ class RootVisualTest {
                 "Final bright sweep did not remain complete",
                 complete > (right - left) * .95,
             )
-            listOf(first, middle, firstPass, darkPass, darkFinished, finalBright, finished)
+            fun glintCenter(image: Bitmap): Float {
+                var sum = 0L
+                var count = 0
+                for (py in bounds.top.toInt() until (bounds.top + 80f * unit).toInt()) {
+                    for (px in left until right) {
+                        val color = image.getPixel(px, py)
+                        if (
+                            android.graphics.Color.green(color) > 235 &&
+                                android.graphics.Color.blue(color) > 225
+                        ) {
+                            sum += px
+                            count++
+                        }
+                    }
+                }
+                assertTrue("No visible highlight within the glyphs", count > 20)
+                return sum.toFloat() / count
+            }
+            assertTrue(
+                "Highlight must travel right",
+                glintCenter(darkPass) > glintCenter(firstPass) + 30f,
+            )
+            val returning = frame(root, "wordmark-sheen-returning", 1100)
+            val returned = frame(root, "wordmark-sheen-returned", 500)
+            assertTrue(
+                "Highlight must return left",
+                glintCenter(returned) < glintCenter(returning) - 30f,
+            )
+            for (image in listOf(firstPass, darkPass, returning, returned)) {
+                assertEquals(
+                    "Highlight leaked into the O counter",
+                    android.graphics.Color.BLACK,
+                    image.getPixel(
+                        (bounds.left + 36f * unit).toInt(),
+                        (bounds.top + 40f * unit).toInt(),
+                    ),
+                )
+                assertTrue(
+                    "Highlight changed the idle underline",
+                    countInk(finished) > (right - left) * .95,
+                )
+            }
+            listOf(
+                    first,
+                    middle,
+                    firstPass,
+                    darkPass,
+                    darkFinished,
+                    finalBright,
+                    finished,
+                    returning,
+                    returned,
+                )
                 .forEach { it.recycle() }
             val before = app.discoveryRevision.value
             compose.onNode(hasScrollAction()).performTouchInput {

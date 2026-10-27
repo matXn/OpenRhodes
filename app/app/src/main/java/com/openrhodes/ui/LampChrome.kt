@@ -17,12 +17,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -201,6 +204,18 @@ private fun HomeBrandToolbar(
     refreshing: Boolean,
 ) {
     val density = LocalDensity.current
+    val sheenTransition = rememberInfiniteTransition(label = "wordmarkSheen")
+    val sheenPosition by
+        sheenTransition.animateFloat(
+            initialValue = -.25f,
+            targetValue = 1.25f,
+            animationSpec =
+                infiniteRepeatable(
+                    tween(2600, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+            label = "wordmarkSheenPosition",
+        )
     val sweep = remember { Animatable(0f) }
     val busyMix by
         animateFloatAsState(if (refreshing) 1f else 0f, tween(180), label = "underlineRefresh")
@@ -228,8 +243,28 @@ private fun HomeBrandToolbar(
                                 text = AnnotatedString(title)
                                 heading()
                             }
+                            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                             .drawWithContent {
                                 drawContent()
+                                // Tint only existing glyph pixels. Draw the underline afterward so
+                                // neither its entrance nor its refresh sweep shares this highlight.
+                                drawRect(
+                                    Color.Black.copy(alpha = .12f),
+                                    blendMode = BlendMode.SrcAtop,
+                                )
+                                val center = titleWidth * sheenPosition
+                                val bandWidth = titleWidth * .30f
+                                drawRect(
+                                    brush =
+                                        Brush.linearGradient(
+                                            0f to Color.Transparent,
+                                            .5f to Color.White.copy(alpha = .90f),
+                                            1f to Color.Transparent,
+                                            start = Offset(center - bandWidth / 2f, size.height),
+                                            end = Offset(center + bandWidth / 2f, 0f),
+                                        ),
+                                    blendMode = BlendMode.SrcAtop,
+                                )
                                 val entrance = underlineEntrance().coerceIn(0f, 3f)
                                 val pull = refreshPull().coerceIn(0f, 1f)
                                 val height = 3.5.dp.toPx()

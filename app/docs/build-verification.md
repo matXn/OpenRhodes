@@ -1,3 +1,19 @@
+# Wordmark highlight 2.1.27-dev — 2026-10-27
+
+- Added a diagonal soft white highlight that traverses the wordmark in 2.6s,
+  reversing continuously. Its gradient uses SrcAtop on a local offscreen glyph
+  layer; transparency is retained inside letter counters and around the image.
+  The underlying glyphs are gently dimmed for visible contrast without a glow
+  outside the wordmark. Underline drawing runs after the highlight and retains
+  its independent entrance and refresh behavior.
+- APK assembly, the five relevant root native-render/gesture/navigation tests
+  and Android Lint passed. Pixel checks verify both highlight directions,
+  transparent O counter, circular O, underline attachment and entry/refresh.
+- Installed and launched code 52 / 2.1.27-dev in UU/MuMu Android 15. Two native
+  screenshots 700ms apart confirm visible wordmark changes. Captures remain in
+  ignored app/build/ui-review-2127; no physical phone was used.
+- APK SHA-256: c79a9e64ec2ab76fbab735202742e88a014861752ebffeb549efeab87befcb98
+
 # Proportional SVG wordmark 2.1.26-dev — 2026-10-27
 
 - Removed the 0.78 horizontal transform from both SVG and Android vector.

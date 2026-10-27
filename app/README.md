@@ -19,10 +19,11 @@ OpenRhodes 原生 Android 客户端源码。此目录是独立 Gradle 工程，A
 
 ## 当前开发版
 
-2.1.26-dev（versionCode 51）。首页字标由独立 SVG 几何路径绘制，
+2.1.27-dev（versionCode 52）。首页字标由独立 SVG 几何路径绘制，
 Android 使用匹配的原生 vector，不分发 Polymath Demo 或其他字体文件。
 `artwork/openrhodes-wordmark.svg` 可直接用于浏览器；
 `python tools/build_wordmark.py` 同步生成 SVG 与原生 vector。
+字标内有每程 2.6 秒、左右往返的柔和白色高光，透明字腔保持透明。
 应用中的下划线独立绘制，以保留入场和刷新动画。
 
 ## 构建
