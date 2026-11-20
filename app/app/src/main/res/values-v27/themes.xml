@@ -1,11 +1,11 @@
 <resources>
     <style name="Theme.OpenRhodes" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">#000000</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">@color/window_surface</item>
+        <item name="android:statusBarColor">@color/window_surface</item>
+        <item name="android:navigationBarColor">@color/window_surface</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
         <item name="android:colorAccent">#EEAC43</item>
     </style>
 </resources>

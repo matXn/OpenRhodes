@@ -8,11 +8,15 @@ object BreathVisual {
     const val WINDOW_MS = 20000.0
 
     /** Same logical output formula as the firmware, extrapolated from its sampled phase. */
-    fun outputPercent(state: LampState, now: Long): Float =
+    fun outputPercent(
+        state: LampState,
+        now: Long,
+        brightness: Float = state.brightness.toFloat(),
+    ): Float =
         when {
             !state.on -> 0f
-            state.breathing -> state.brightness * state.breath.wave(state.phaseAt(now))
-            else -> state.brightness.toFloat()
+            state.breathing -> brightness * state.breath.wave(state.phaseAt(now))
+            else -> brightness
         }.coerceIn(0f, 100f)
 
     fun plotLevel(parameters: Breath, fraction: Double, startPhase: Double = 0.0) =
@@ -26,15 +30,22 @@ object BreathVisual {
         )
 
     /** Translate a cached periodic path left; wrapping by one cycle leaves the image identical. */
-    fun scrollFraction(state: LampState, now: Long): Double {
-        val phase = ((state.phaseAt(now) % (2 * PI)) + 2 * PI) % (2 * PI)
-        return phase / (2 * PI) * state.breath.periodMs / WINDOW_MS
+    fun scrollFraction(state: LampState, now: Long): Double =
+        scrollFraction(state.breath, state.phaseAt(now))
+
+    fun scrollFraction(parameters: Breath, phase: Double): Double {
+        val wrapped = ((phase % (2 * PI)) + 2 * PI) % (2 * PI)
+        return wrapped / (2 * PI) * parameters.periodMs / WINDOW_MS
     }
 
     /** Keep a visible, compressed breath even at a 1% setting, without a full black/white pulse. */
-    fun cardEnergy(state: LampState, now: Long): Float {
+    fun cardEnergy(
+        state: LampState,
+        now: Long,
+        brightness: Float = state.brightness.toFloat(),
+    ): Float {
         if (!state.on) return .03f
-        val base = (state.brightness / 100f).pow(1.3f) * .85f
+        val base = (brightness / 100f).pow(1.3f) * .85f
         if (!state.breathing) return base
         val wave = state.breath.wave(state.phaseAt(now))
         return (.14f + base * .80f + (wave - .5f) * .26f).coerceIn(0f, 1f)

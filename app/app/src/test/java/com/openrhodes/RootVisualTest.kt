@@ -25,13 +25,13 @@ import org.robolectric.annotation.*
 import org.robolectric.shadows.*
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = RhodesApp::class, qualifiers = "w393dp-h852dp-xhdpi")
+@Config(sdk = [34], application = RhodesApp::class, qualifiers = "w393dp-h852dp-night-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class RootVisualTest {
     @get:Rule val compose = createEmptyComposeRule()
     private var viewportWidth = 393
 
-    private fun frame(root: View, name: String, advanceMs: Long = 2800): Bitmap {
+    private fun frame(root: View, name: String, advanceMs: Long = 6500): Bitmap {
         compose.mainClock.advanceTimeBy(advanceMs)
         compose.waitForIdle()
         ShadowLooper.idleMainLooper(120, TimeUnit.MILLISECONDS)
@@ -65,7 +65,7 @@ class RootVisualTest {
         fontScale: Float = 1f,
     ) {
         viewportWidth = width
-        RuntimeEnvironment.setQualifiers("w${width}dp-h852dp-xhdpi")
+        RuntimeEnvironment.setQualifiers("w${width}dp-h852dp-night-xhdpi")
         RuntimeEnvironment.setFontScale(fontScale)
         ShadowChoreographer.setPaused(false)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
@@ -105,8 +105,10 @@ class RootVisualTest {
                 (headingBounds.top + WordmarkGeometry.OTop * unit).toInt() until
                     (headingBounds.top + WordmarkGeometry.OBottom * unit).toInt()) {
                 for (x in
-                    headingBounds.left.toInt() until
-                        (headingBounds.left + WordmarkGeometry.OWidth * unit).toInt()) {
+                    (headingBounds.left + WordmarkGeometry.OLeft * unit).toInt() until
+                        (headingBounds.left +
+                                (WordmarkGeometry.OLeft + WordmarkGeometry.OWidth) * unit)
+                            .toInt()) {
                     if (isInk(x, y)) oPixels.add(x to y)
                 }
             }
@@ -117,7 +119,7 @@ class RootVisualTest {
                 oHeight * WordmarkGeometry.OWidth /
                     (WordmarkGeometry.OBottom - WordmarkGeometry.OTop),
                 oWidth.toFloat(),
-                2f,
+                3f,
             )
             val ruleLeft = headingBounds.left.toInt() + 2
             val ruleRight = headingBounds.right.toInt() - 2
@@ -134,14 +136,19 @@ class RootVisualTest {
             val pRight = (headingBounds.left + WordmarkGeometry.OpenEnd * unit).toInt()
             val joinedColumns =
                 (pLeft until pRight).count { x ->
-                    ((baseline + 1).toInt()..requireNotNull(ruleY)).all { y -> isInk(x, y) }
+                    // 分数像素缩放后，接缝允许一个抗锯齿像素，不能形成可见间隙。
+                    ((baseline + 1).toInt()..requireNotNull(ruleY)).count { y ->
+                        android.graphics.Color.red(homeImage.getPixel(x, y)) < 70
+                    } <= 1
                 }
             assertTrue("Underline is detached from the p descender", joinedColumns >= 2)
             val spaceX =
                 (headingBounds.left +
                         (WordmarkGeometry.OpenEnd + WordmarkGeometry.RhodesStart) * .5f * unit)
                     .toInt()
-            for (y in headingBounds.top.toInt() until (headingBounds.top + 80f * unit).toInt()) {
+            for (y in
+                headingBounds.top.toInt() until
+                    (headingBounds.top + (WordmarkGeometry.Baseline + 8f) * unit).toInt()) {
                 assertEquals(
                     "Open 与 Rhodes 之间应有清晰空格",
                     android.graphics.Color.BLACK,
@@ -163,7 +170,26 @@ class RootVisualTest {
                 2f,
             )
             compose.onNodeWithText("本地灯具").assertDoesNotExist()
-            compose.onNodeWithText("#02:00:00:00:00:10").assertIsDisplayed()
+            compose.onNodeWithText("Mac:02:00:00:00:00:10").assertIsDisplayed()
+            val deviceBounds =
+                compose
+                    .onNodeWithText(name, useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val macBounds =
+                compose
+                    .onNodeWithText("Mac:02:00:00:00:00:10", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val levelBounds =
+                compose
+                    .onNodeWithText("56%", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            assertTrue("状态点和 MAC 应在设备名下方", macBounds.top >= deviceBounds.bottom)
+            assertTrue("亮度应位于设备信息右侧", levelBounds.left >= deviceBounds.right)
+            assertTrue("亮度不能越过页面右侧边距", levelBounds.right <= (viewportWidth - 19) * 2f)
+
             compose.onNodeWithText("未连接 · 点开恢复连接").assertDoesNotExist()
             compose.onNodeWithText("等待连接").assertDoesNotExist()
             compose.onNodeWithText("离线").assertDoesNotExist()
@@ -201,10 +227,20 @@ class RootVisualTest {
                 compose.onNodeWithContentDescription("添加灯具").performClick()
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
-                frame(requireNotNull(ShadowDialog.getLatestDialog().window).decorView, "root-add")
-                    .recycle()
-                compose.onNodeWithText("自动发现附近的灯具").assertIsDisplayed()
-                compose.onNodeWithText("没有找到灯具？").assertIsDisplayed()
+                frame(root, "root-add").recycle()
+                compose.onAllNodes(isDialog()).assertCountEquals(0)
+                compose.onNodeWithText("连接").assertIsDisplayed()
+                compose.onNodeWithText("热点配网").assertDoesNotExist()
+                compose.onNodeWithText("高级选项").performClick()
+                compose.mainClock.advanceTimeBy(300)
+                compose.onNodeWithText("热点配网").assertIsDisplayed()
+                compose.onNodeWithText("手动地址").performClick()
+                compose.mainClock.advanceTimeBy(300)
+                compose.onNodeWithText("IP 或 rhodeslight.local").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
+                compose.mainClock.advanceTimeBy(300)
+                compose.onNodeWithText("高级选项").assertIsDisplayed()
+                compose.onNodeWithText("手动地址").assertDoesNotExist()
                 compose.onNodeWithText("IP 或 rhodeslight.local").assertDoesNotExist()
                 compose.onNodeWithText("旧固件兼容（需连接灯具热点）").assertDoesNotExist()
                 compose.onNodeWithContentDescription("返回").performClick()
@@ -224,11 +260,23 @@ class RootVisualTest {
                         .onNodeWithContentDescription("Rhodes Light")
                         .fetchSemanticsNode()
                         .boundsInRoot
+                val backButton = compose.onNodeWithContentDescription("返回")
+                val restingBackX = backButton.fetchSemanticsNode().boundsInRoot.left
                 compose.onNodeWithContentDescription("设备设置").performClick()
+                frame(root, "settings-entering", 32).recycle()
+                val enteringX = backButton.fetchSemanticsNode().boundsInRoot.left
+                assertTrue("进入设置从右侧滑入，当前 $enteringX，静止 $restingBackX",
+                    enteringX > restingBackX + 3f)
                 val settings = frame(root, "root-settings")
-                compose.onNodeWithText("Wi-Fi 与配网").assertIsDisplayed()
+                compose.onNodeWithText("连接").assertIsDisplayed()
                 assertFalse("Settings action did not navigate", main.sameAs(settings))
-                compose.onNodeWithContentDescription("返回").performClick()
+                backButton.performClick()
+                frame(root, "control-returning", 32).recycle()
+                compose.onNodeWithText("连接").assertDoesNotExist()
+                val returningX = backButton.fetchSemanticsNode().boundsInRoot.left
+                assertTrue("返回控制页从左侧滑入，当前 $returningX，静止 $restingBackX",
+                    returningX < restingBackX - 3f)
+                compose.onAllNodesWithContentDescription("返回").assertCountEquals(1)
                 val back = frame(root, "root-returned")
                 compose.onNodeWithContentDescription("设备设置").assertIsDisplayed()
                 compose.onNodeWithText("重新连接").assertDoesNotExist()
@@ -289,12 +337,12 @@ class RootVisualTest {
             val initial = countInk(first)
             val middle = frame(root, "underline-entry-middle", 180)
             val partial = countInk(middle)
-            val firstPass = frame(root, "underline-entry-first-pass", 620)
+            val firstPass = frame(root, "underline-entry-first-pass", 1640)
             val firstPassInk = countInk(firstPass)
-            val darkPass = frame(root, "underline-entry-dark-pass", 400)
-            val darkFinished = frame(root, "underline-entry-dark-finished", 400)
-            val finalBright = frame(root, "underline-entry-final-bright-pass", 250)
-            val finished = frame(root, "underline-entry-finished", 650)
+            val darkPass = frame(root, "underline-entry-dark-pass", 700)
+            val darkFinished = frame(root, "underline-entry-dark-finished", 1240)
+            val finalBright = frame(root, "underline-entry-final-bright-pass", 550)
+            val finished = frame(root, "underline-entry-finished", 2200)
             val complete = countInk(finished)
             fun brightAt(image: Bitmap, fraction: Float) =
                 android.graphics.Color.red(
@@ -318,33 +366,31 @@ class RootVisualTest {
                 "Final bright sweep did not remain complete",
                 complete > (right - left) * .95,
             )
-            fun glintCenter(image: Bitmap): Float {
+            fun shadowCenter(image: Bitmap, reference: Bitmap): Float {
                 var sum = 0L
                 var count = 0
-                for (py in bounds.top.toInt() until (bounds.top + 80f * unit).toInt()) {
+                for (py in
+                    bounds.top.toInt() until
+                        (bounds.top + (WordmarkGeometry.Baseline + 8f) * unit).toInt()) {
                     for (px in left until right) {
                         val color = image.getPixel(px, py)
-                        if (
-                            android.graphics.Color.green(color) > 235 &&
-                                android.graphics.Color.blue(color) > 225
-                        ) {
+                        val other = reference.getPixel(px, py)
+                        if (android.graphics.Color.green(other) - android.graphics.Color.green(color) > 20) {
                             sum += px
                             count++
                         }
                     }
                 }
-                assertTrue("No visible highlight within the glyphs", count > 20)
+                assertTrue("No moving shadow within the glyphs", count > 20)
                 return sum.toFloat() / count
             }
-            assertTrue(
-                "Highlight must travel right",
-                glintCenter(darkPass) > glintCenter(firstPass) + 30f,
-            )
-            val returning = frame(root, "wordmark-sheen-repeat-start", 1100)
+            // 高光独立于下划线时长，按自己的周期取样，不能沿用入场截图的时刻。
+            val nextCycle = 2600 - compose.mainClock.currentTime % 2600
+            val returning = frame(root, "wordmark-sheen-repeat-start", nextCycle + 700)
             val returned = frame(root, "wordmark-sheen-repeat-advanced", 500)
             assertTrue(
-                "高光的新一轮仍应向右移动",
-                glintCenter(returned) > glintCenter(returning) + 30f,
+                "The dark sweep should move right across the lettering",
+                shadowCenter(returned, returning) > shadowCenter(returning, returned) + (right - left) * .1f,
             )
             for (image in listOf(firstPass, darkPass, returning, returned)) {
                 assertEquals(
@@ -382,16 +428,21 @@ class RootVisualTest {
                 down(Offset(centerX, height * .1f))
                 moveBy(Offset(0f, 80f), 120)
             }
-            val partialPull = frame(root, "home-pull-partial", 32)
+            val partialPull = frame(root, "home-pull-partial", 1600)
             val partialOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
-            assertTrue("列表应跟随未达阈值的下拉手势", partialOffset in 10f..90f)
+            assertTrue("列表应跟随未达阈值的下拉手势", partialOffset in 10f..122f)
             val progress =
                 (left until right)
                     .count { px ->
-                        android.graphics.Color.green(partialPull.getPixel(px, y)) > 210
+                        android.graphics.Color.green(partialPull.getPixel(px, y)) > 100
                     }
                     .toFloat() / (right - left)
-            assertEquals("横条进度应与列表下移距离匹配", partialOffset / 128f, progress, .10f)
+            assertEquals(
+                "蓄力亮段应随下拉伸长",
+                .12f + .20f * (partialOffset / (128f * 1.35f)),
+                progress,
+                .06f,
+            )
             assertEquals("下拉时底部署名应固定", originalFooter, footer.fetchSemanticsNode().boundsInRoot)
             assertEquals("下拉时标题应固定", bounds, heading.fetchSemanticsNode().boundsInRoot)
             assertEquals("达到阈值前不能刷新", before, app.discoveryRevision.value)
@@ -408,13 +459,33 @@ class RootVisualTest {
                 down(Offset(centerX, height * .1f))
                 moveBy(Offset(0f, 400f), 200)
             }
-            val armedPull = frame(root, "home-pull-armed", 32)
+            val armedPull = frame(root, "home-pull-armed", 1600)
             val armedOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
-            assertTrue("达到阈值后仍保留有上限的阻尼位移", armedOffset in 120f..162f)
-            assertTrue("达到刷新阈值横条应填满", countInk(armedPull) > (right - left) * .95)
+            assertTrue("达到阈值后仍保留有上限的阻尼位移", armedOffset in 162f..219f)
+            assertTrue(
+                "达到阈值亮段宽度应约为三成",
+                countInk(armedPull).toFloat() / (right - left) in 0.25f..0.40f,
+            )
             assertEquals("尚未松手时不能刷新", before, app.discoveryRevision.value)
             scrolling.performTouchInput { up() }
+            val firstReturn = frame(root, "home-return-early", 80)
+            val firstReturnOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
+            assertTrue("松手后应立即回弹而非停靠", firstReturnOffset < armedOffset - 8f)
+            val secondReturn = frame(root, "home-return-middle", 80)
+            val secondReturnOffset = marker.fetchSemanticsNode().boundsInRoot.top - originalTop
+            assertTrue("回弹中途不能停顿", secondReturnOffset < firstReturnOffset - 2f)
+            firstReturn.recycle()
+            secondReturn.recycle()
+            val released = frame(root, "underline-release", 90)
+            assertTrue("刷新松手后必须保留释放光带", countInk(released) < (right - left) * .65)
+            released.recycle()
             frame(root, "underline-after-pull").recycle()
+            assertEquals(
+                "空列表刷新结束后内容必须自动回到原位",
+                originalTop,
+                marker.fetchSemanticsNode().boundsInRoot.top,
+                2f,
+            )
             partialPull.recycle()
             armedPull.recycle()
             compose.waitUntil(5000) { app.discoveryRevision.value == before + 1 }

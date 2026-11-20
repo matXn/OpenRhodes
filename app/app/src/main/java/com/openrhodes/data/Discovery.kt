@@ -153,6 +153,9 @@ fun discoverLamps(context: Context) = callbackFlow {
 
 /** Prefer addresses reachable through the current link before historical networks. */
 fun orderForNetwork(context: Context, lamp: Lamp): Lamp {
+    // 用户选择直连时不让 DHCP / mDNS 线索改回 HTTP。
+    if (lamp.endpoints.firstOrNull()?.isBluetooth == true)
+        return lamp.copy(endpoints = lamp.endpoints.filter { it.isBluetooth })
     val connectivity = context.getSystemService(ConnectivityManager::class.java)
     val links =
         connectivity.allNetworks

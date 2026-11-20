@@ -1,17 +1,19 @@
 package com.openrhodes.ui
 
-// 由 tools/build_wordmark.py 生成，避免 SVG 与原生布局尺寸漂移。
+// 从输入 PNG 整体描摹生成，不能逐字重排。
 internal object WordmarkGeometry {
-    const val Width = 556.0000f
-    const val Height = 100.0000f
-    const val Baseline = 74.0000f
-    const val RuleTop = 92.0000f
-    const val CapCenter = 39.0000f
-    const val OWidth = 74.7640f
-    const val OTop = 2.7170f
-    const val OBottom = 75.2830f
-    const val OCounterX = 37.3820f
-    const val OCounterY = 39.0000f
-    const val OpenEnd = 228.3540f
-    const val RhodesStart = 244.3540f
+    const val Width = 1536.0000f
+    const val Height = 272.0000f
+    const val Baseline = 209.0000f
+    const val RuleTop = 254.0000f
+    const val RuleHeight = 17.0000f
+    const val CapCenter = 111.5081f
+    const val OLeft = 5.7178f
+    const val OWidth = 200.9207f
+    const val OTop = 10.0162f
+    const val OBottom = 213.0000f
+    const val OCounterX = 106.1782f
+    const val OCounterY = 111.5081f
+    const val OpenEnd = 623.0000f
+    const val RhodesStart = 707.0000f
 }

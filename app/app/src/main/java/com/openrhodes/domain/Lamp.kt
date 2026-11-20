@@ -37,11 +37,28 @@ value class HardwareId private constructor(val value: String) {
 
 @JvmInline
 value class Endpoint private constructor(val host: String) {
+    val isBluetooth: Boolean
+        get() = host.startsWith("ble://")
+
+    val bluetoothIdentity: HardwareId?
+        get() = if (isBluetooth) HardwareId.parse(host.removePrefix("ble://")) else null
+
+    val label: String
+        get() = if (isBluetooth) "BLE" else host
+
     val url: String
-        get() = "http://$host"
+        get() = if (isBluetooth) host else "http://$host"
 
     companion object {
+        fun bluetooth(hardware: HardwareId) =
+            Endpoint("ble://" + hardware.value.removePrefix("mac:"))
+
         fun parse(text: String): Endpoint? = runCatching {
+            if (text.trim().startsWith("ble://")) {
+                val raw = text.trim().removePrefix("ble://")
+                require(raw.matches(Regex("[0-9a-fA-F]{12}")))
+                return@runCatching bluetooth(requireNotNull(HardwareId.parse(raw)))
+            }
             val raw = text.trim()
             val uri = URI(if (raw.contains("://")) raw else "http://$raw")
             require(
@@ -94,6 +111,7 @@ data class LampState(
     val hardware: HardwareId? = null,
     val wifiName: String? = null,
     val deviceIp: String? = null,
+    val firmwareVersion: String? = null,
 ) {
     fun phaseAt(now: Long) = phase + (now - sampledAt).coerceAtLeast(0) * 2 * PI / breath.periodMs
 

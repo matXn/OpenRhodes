@@ -38,6 +38,103 @@ class ConnectionTest {
     private fun scope() = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     @Test
+    fun leavingAndReturningToPageSharesThePendingBluetoothRead() = runBlocking {
+        val owner = scope()
+        try {
+            val entered = CompletableDeferred<Unit>()
+            val response = CompletableDeferred<Unit>()
+            var reads = 0
+            var cancelled = false
+            val fake = object : Fake() {
+                override suspend fun read(endpoint: Endpoint): LampState {
+                    reads++
+                    entered.complete(Unit)
+                    try { response.await() }
+                    catch (failure: CancellationException) { cancelled = true; throw failure }
+                    return state
+                }
+            }
+            val bleLamp = lamp.copy(endpoints = listOf(Endpoint.bluetooth(hardware)))
+            val session = LampSession(owner, { bleLamp }, fake)
+            val firstPage = launch { session.refresh(force = true) }
+            entered.await()
+            firstPage.cancelAndJoin()
+            assertFalse(cancelled)
+            session.foregrounded()
+            val returnedPage = launch { session.refresh(force = true) }
+            yield()
+            assertEquals(1, reads)
+            response.complete(Unit)
+            returnedPage.join()
+            assertEquals(fake.state, session.observation.value.state)
+            assertFalse(session.observation.value.connecting)
+            assertFalse(cancelled)
+        } finally { owner.cancel() }
+    }
+
+    @Test
+    fun removingDeviceCancelsBluetoothReadEvenAfterPageHasLeft() = runBlocking {
+        val owner = scope()
+        val entered = CompletableDeferred<Unit>()
+        val stopped = CompletableDeferred<Unit>()
+        try {
+            val fake = object : Fake() {
+                override suspend fun read(endpoint: Endpoint): LampState {
+                    entered.complete(Unit)
+                    try { awaitCancellation() } finally { stopped.complete(Unit) }
+                }
+            }
+            val bleLamp = lamp.copy(endpoints = listOf(Endpoint.bluetooth(hardware)))
+            val session = LampSession(owner, { bleLamp }, fake)
+            val page = launch { session.refresh() }
+            entered.await()
+            page.cancelAndJoin()
+            owner.cancel()
+            withTimeout(1000) { stopped.await() }
+            assertNull(session.observation.value.state)
+        } finally { owner.cancel() }
+    }
+
+    @Test
+    fun wifiNetworkChangeKeepsVerifiedBluetoothSessionUsable() = runBlocking {
+        val scope = scope()
+        try {
+            val ble = Endpoint.bluetooth(hardware)
+            val fake = object : Fake() {
+                override suspend fun read(endpoint: Endpoint): LampState = error("不应重复核验")
+            }
+            val session = LampSession(scope, { lamp.copy(endpoints = listOf(ble)) }, fake)
+            session.acceptDiscovered(ble, fake.state)
+            val before = session.observation.value
+            session.localNetworkChanged()
+            assertEquals(before, session.observation.value)
+            session.execute(Command.Level(42))
+            assertEquals(listOf(Command.Level(42)), fake.writes)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun wifiNetworkChangeStillInvalidatesHttpVerification() = runBlocking {
+        val scope = scope()
+        try {
+            var reads = 0
+            val fake = object : Fake() {
+                override suspend fun read(endpoint: Endpoint): LampState { reads++; return state }
+            }
+            val session = LampSession(scope, { lamp }, fake)
+            session.acceptDiscovered(endpoint, fake.state)
+            session.localNetworkChanged()
+            assertTrue(session.observation.value.connecting)
+            session.execute(Command.Level(42))
+            assertEquals(1, reads)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun initialProbeAndNetworkChangeStayCheckingUntilAResponseArrives() = runBlocking {
         val scope = scope()
         try {

@@ -11,17 +11,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.openrhodes.RhodesApp
+import androidx.compose.ui.unit.sp
 import com.openrhodes.data.SetupAccessPoint
-import com.openrhodes.domain.Endpoint
+import com.openrhodes.data.WifiSettingsClient
 import kotlinx.coroutines.*
 
 @Composable
 fun AccessPointSettings(
-    app: RhodesApp,
+    client: WifiSettingsClient,
     lampId: String,
     enabled: Boolean,
-    target: suspend () -> Endpoint,
     onBusy: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -39,7 +38,7 @@ fun AccessPointSettings(
         error = null
         copied = null
         try {
-            accessPoint = app.api.setupAccessPoint(target(), hidden)
+            accessPoint = client.accessPoint(hidden)
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (failure: Exception) {
@@ -52,80 +51,47 @@ fun AccessPointSettings(
 
     fun copy(label: String, value: String, sensitive: Boolean = false) {
         val clip = ClipData.newPlainText(label, value)
-        if (sensitive) {
-            clip.description.extras =
-                PersistableBundle().apply {
-                    putBoolean("android.content.extra.IS_SENSITIVE", true)
-                }
+        if (sensitive) clip.description.extras = PersistableBundle().apply {
+            putBoolean("android.content.extra.IS_SENSITIVE", true)
         }
-        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(
-            clip
-        )
+        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
         copied = "已复制$label"
     }
+    LaunchedEffect(client, lampId) { request() }
 
-    LaunchedEffect(lampId) { request() }
-
-    HorizontalDivider(Modifier.padding(vertical = 20.dp))
-    Text("灯具配网热点", style = MaterialTheme.typography.titleMedium)
     val ap = accessPoint
-    if (ap != null) {
+    if (ap != null) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text("隐藏 SSID")
-                Text(
-                    if (ap.hidden) "名称已隐藏，热点仍可连接" else "在附近网络列表中显示名称",
-                    color = Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text("隐藏热点名称")
+                Text(if (ap.hidden) "名称已隐藏，热点仍可连接" else "在附近网络列表中显示名称",
+                    color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
-            Switch(
-                checked = ap.hidden,
-                enabled = enabled && !working,
-                onCheckedChange = { hidden -> scope.launch { request(hidden) } },
-            )
+            Switch(checked = ap.hidden, enabled = enabled && !working,
+                onCheckedChange = { hidden -> scope.launch { request(hidden) } })
         }
-        if (ap.hidden) {
-            Text(
-                "在手机 Wi-Fi 设置中手动添加网络，选择隐藏网络及 WPA2-Personal。",
-                color = Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("SSID", color = Muted, style = MaterialTheme.typography.labelMedium)
-                    Text(ap.ssid)
-                }
-                TextButton(onClick = { copy("SSID", ap.ssid) }) { Text("复制 SSID") }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text("热点名称", color = Muted, fontSize = 12.sp)
+                Text(ap.ssid, modifier = Modifier.padding(top = 5.dp))
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("热点密码", color = Muted, style = MaterialTheme.typography.labelMedium)
-                    Text(if (showPassword) ap.password.ifEmpty { "无密码" } else "••••••••")
-                }
-                TextButton(onClick = { showPassword = !showPassword }) {
-                    Text(if (showPassword) "隐藏" else "显示")
-                }
-                TextButton(onClick = { copy("密码", ap.password, sensitive = true) }) {
-                    Text("复制密码")
-                }
-            }
-            Text("配网页：${ap.ip}", color = Muted, style = MaterialTheme.typography.bodySmall)
-        } else {
-            Text(
-                "隐藏后可在这里复制热点名称和密码；关闭“隐藏 SSID”即可恢复广播。",
-                color = Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            TextButton(onClick = { copy("热点名称", ap.ssid) }) { Text("复制") }
         }
+        Column {
+            Text("热点密码", color = Muted, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (showPassword) ap.password.ifEmpty { "无密码" } else "••••••••", Modifier.weight(1f))
+                TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "隐藏" else "显示") }
+                TextButton(onClick = { copy("热点密码", ap.password, sensitive = true) }) { Text("复制密码") }
+            }
+        }
+        if (ap.hidden) Text("在手机 Wi-Fi 设置中手动添加网络，选择隐藏网络及 WPA2-Personal。",
+            color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
     }
-    if (working) Text("正在更新热点设置…", color = Muted)
+    if (working) Text("正在更新热点设置…", color = Muted, fontSize = 13.sp)
     error?.let {
-        Text(it, color = MaterialTheme.colorScheme.error)
-        TextButton(enabled = enabled && !working, onClick = { scope.launch { request() } }) {
-            Text("重新读取热点设置")
-        }
+        Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+        TextButton(enabled = enabled && !working, onClick = { scope.launch { request() } }) { Text("重新读取") }
     }
-    copied?.let { Text(it, color = Gold, style = MaterialTheme.typography.bodySmall) }
-    HorizontalDivider(Modifier.padding(vertical = 20.dp))
+    copied?.let { Text(it, color = Gold, fontSize = 12.sp) }
 }

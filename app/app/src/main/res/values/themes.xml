@@ -1,15 +1,27 @@
 <resources>
     <style name="Theme.OpenRhodes" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">#000000</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/window_surface</item>
+        <item name="android:statusBarColor">@color/window_surface</item>
+        <item name="android:navigationBarColor">@color/window_surface</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
         <item name="android:colorAccent">#EEAC43</item>
     </style>
     <style name="Theme.OpenRhodes.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">#000000</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/lamp_mark</item>
+        <item name="windowSplashScreenBackground">@color/window_surface</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/rhodes_start_panel</item>
         <item name="postSplashScreenTheme">@style/Theme.OpenRhodes</item>
     </style>
+    <style name="Theme.OpenRhodes.WidgetPicker" parent="Theme.OpenRhodes">
+        <item name="android:windowAnimationStyle">@style/OpenRhodesActivityMotion</item>
+    </style>
+    <style name="OpenRhodesActivityMotion" parent="android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/rhodes_dialog_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/rhodes_dialog_exit</item>
+    </style>
+    <style name="OpenRhodesDialogMotion">
+        <item name="android:windowEnterAnimation">@anim/rhodes_dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/rhodes_dialog_exit</item>
+    </style>
 </resources>
+

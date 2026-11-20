@@ -30,8 +30,8 @@ android {
         applicationId = "com.openrhodes.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 53
-        versionName = "2.1.28-dev"
+        versionCode = 77
+        versionName = "2.2.19-dev"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -66,3 +66,6 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
 }
+
+
+

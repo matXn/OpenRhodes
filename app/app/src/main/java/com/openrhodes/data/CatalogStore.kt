@@ -98,6 +98,12 @@ class CatalogStore(private val context: Context) {
         }
     }
 
+    /** 按规范记录删除，旧别名和历史地址随记录一并移除。 */
+    suspend fun remove(id: String) = change { rows ->
+        val canonical = CatalogRules.resolve(rows, id) ?: error("设备记录不存在")
+        rows.filterNot { it.id == canonical.id }
+    }
+
     suspend fun discovered(endpoint: Endpoint, state: LampState) {
         val hardware = state.hardware ?: return
         change { rows ->
@@ -106,7 +112,15 @@ class CatalogStore(private val context: Context) {
             else
                 CatalogRules.enroll(
                     rows,
-                    known.copy(endpoints = listOf(endpoint) + known.endpoints),
+                    known.copy(
+                        endpoints =
+                            if (
+                                known.endpoints.firstOrNull()?.isBluetooth == true &&
+                                    !endpoint.isBluetooth
+                            )
+                                known.endpoints + endpoint
+                            else listOf(endpoint) + known.endpoints
+                    ),
                 )
         }
     }
@@ -122,6 +136,23 @@ class CatalogStore(private val context: Context) {
             )
         )
     }
+
+    // 原子保存后返回首次添加标记，重复回调不会制造第二条记录。
+    suspend fun completeAdd(endpoint: Endpoint, state: LampState, extra: List<Endpoint> = emptyList(), name: String = "Rhodes Light"): AddCompletion =
+        withContext(Dispatchers.IO) {
+            lock.withLock {
+                check(loaded)
+                require(name.isNotBlank() && name.trim().length <= 48)
+                val hardware = requireNotNull(state.hardware)
+                val existing = _lamps.value.firstOrNull { it.hardware == hardware }
+                val record = existing ?: Lamp(UUID.randomUUID().toString(), name.trim(), hardware, listOf(endpoint))
+                val next = CatalogRules.enroll(_lamps.value, record.copy(endpoints =
+                    (listOf(endpoint) + extra + record.endpoints).distinct()))
+                persist(next)
+                _lamps.value = next
+                AddCompletion(requireNotNull(next.firstOrNull { it.hardware == hardware }).id, existing == null, state, record.name)
+            }
+        }
 
     private suspend fun change(transform: (List<Lamp>) -> List<Lamp>) =
         withContext(Dispatchers.IO) {

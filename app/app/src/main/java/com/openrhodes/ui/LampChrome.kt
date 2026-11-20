@@ -5,6 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -12,19 +14,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -39,12 +47,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openrhodes.R
+import com.openrhodes.domain.UnderlineMotion
 
 @Composable
 internal fun RhodesTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme =
-            darkColorScheme(
+            if (LightAppearance) lightColorScheme(
+                primary = Gold, onPrimary = Color.White, primaryContainer = Color(0xFFFFDEAA),
+                onPrimaryContainer = LabelInk, secondary = Muted, background = PageColor, surface = PageColor,
+                surfaceContainer = GroupColor, surfaceContainerLow = GroupColor, surfaceContainerHigh = GroupColor,
+                surfaceContainerHighest = Color(0xFFEAE6DF), onSurface = LabelInk, onSurfaceVariant = Muted,
+                onBackground = LabelInk, outline = Muted, outlineVariant = Color(0xFFD8D3CA),
+            ) else darkColorScheme(
                 primary = Gold,
                 onPrimary = Color(0xFF251806),
                 primaryContainer = Color(0xFF49351B),
@@ -57,12 +72,12 @@ internal fun RhodesTheme(content: @Composable () -> Unit) {
                 background = Color.Black,
                 surface = Color.Black,
                 surfaceDim = Color.Black,
-                surfaceBright = Color.Black,
-                surfaceContainer = Color.Black,
-                surfaceContainerLow = Color.Black,
-                surfaceContainerLowest = Color.Black,
-                surfaceContainerHigh = Color.Black,
-                surfaceContainerHighest = Color.Black,
+                surfaceBright = Color(0xFF39352F),
+                surfaceContainer = Color(0xFF211E1A),
+                surfaceContainerLow = Color(0xFF191714),
+                surfaceContainerLowest = Color(0xFF0D0C0B),
+                surfaceContainerHigh = Color(0xFF2B2823),
+                surfaceContainerHighest = Color(0xFF35312B),
                 surfaceTint = Color.Transparent,
                 surfaceVariant = Color(0xFF202020),
                 onSurface = Cream,
@@ -138,6 +153,7 @@ internal fun NavIcon(glyph: NavGlyph, description: String, action: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LampToolbar(
     title: String,
@@ -148,9 +164,13 @@ internal fun LampToolbar(
     actionDescription: String = "设备设置",
     prominent: Boolean = false,
     largeTitle: Boolean = false,
+    onTitleBounds: (androidx.compose.ui.geometry.Rect)->Unit = {},
     underlineEntrance: () -> Float = { 3f },
+    onUnderlineEntered: () -> Unit = {},
     refreshPull: () -> Float = { 0f },
     refreshing: Boolean = false,
+    refreshRequest: Int = 0,
+    onTitleClick: (() -> Unit)? = null,
 ) {
     if (prominent) {
         HomeBrandToolbar(
@@ -159,8 +179,27 @@ internal fun LampToolbar(
             actionGlyph,
             actionDescription,
             underlineEntrance,
+            onUnderlineEntered,
             refreshPull,
             refreshing,
+            refreshRequest,
+            onTitleClick,
+        )
+        return
+    }
+    if (!largeTitle) {
+        TopAppBar(
+            title = {
+                Column {
+                    Text(title, style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.onGloballyPositioned { onTitleBounds(it.boundsInRoot()) })
+                    if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            },
+            navigationIcon = { if (back != null) NavIcon(NavGlyph.Back, "返回", back) },
+            actions = { if (action != null) NavIcon(actionGlyph, actionDescription, action) },
+            windowInsets = WindowInsets(0, 0, 0, 0),
         )
         return
     }
@@ -172,8 +211,10 @@ internal fun LampToolbar(
         Column(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp)) {
             Text(
                 title,
+                modifier=Modifier.onGloballyPositioned {onTitleBounds(it.boundsInRoot())},
                 fontSize = if (largeTitle) 32.sp else 21.sp,
-                fontWeight = if (largeTitle) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = if (largeTitle) FontWeight.Light else FontWeight.Medium,
+                fontFamily = if (largeTitle) DeviceTitleFont else null,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -200,28 +241,48 @@ private fun HomeBrandToolbar(
     actionGlyph: NavGlyph,
     actionDescription: String,
     underlineEntrance: () -> Float,
+    onUnderlineEntered: () -> Unit,
     refreshPull: () -> Float,
     refreshing: Boolean,
+    refreshRequest: Int,
+    onTitleClick: (() -> Unit)?,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressLight by animateFloatAsState(
+        if (pressed && onTitleClick != null) 1f else 0f,
+        tween(if (pressed) 80 else 180), label = "homeLogoPressLight",
+    )
+    val titleInteraction = if (onTitleClick == null) Modifier else Modifier
+        .semantics { contentDescription = "刷新灯具状态" }
+        .clickable(interactionSource = interaction, indication = null,
+            role = Role.Button, onClickLabel = "刷新灯具状态", onClick = onTitleClick)
     val density = LocalDensity.current
-    val sheenTransition = rememberInfiniteTransition(label = "wordmarkSheen")
-    val sheenPosition by
-        sheenTransition.animateFloat(
-            initialValue = -.25f,
-            targetValue = 1.25f,
-            animationSpec =
-                infiniteRepeatable(
-                    tween(2600, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart,
-                ),
-            label = "wordmarkSheenPosition",
-        )
-    val sweep = remember { Animatable(0f) }
-    val busyMix by
-        animateFloatAsState(if (refreshing) 1f else 0f, tween(180), label = "underlineRefresh")
-    LaunchedEffect(refreshing) {
-        sweep.snapTo(0f)
-        if (refreshing) sweep.animateTo(1f, infiniteRepeatable(tween(1000, easing = LinearEasing)))
+    val motion = remember {
+        UnderlineMotion(entered = underlineEntrance() >= 3f, initialRequest = refreshRequest)
+    }
+    val currentEntered by rememberUpdatedState(onUnderlineEntered)
+    val currentPull by rememberUpdatedState(refreshPull)
+    val currentRequest by rememberUpdatedState(refreshRequest)
+    val currentRefreshing by rememberUpdatedState(refreshing)
+    var rule by remember { mutableStateOf(motion.frame) }
+    LaunchedEffect(motion) {
+        var previous = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { now ->
+                rule =
+                    motion.advance(
+                        (now - previous) / 1_000_000_000f,
+                        currentPull(),
+                        currentRefreshing,
+                        request = currentRequest,
+                        animations =
+                            (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f,
+                    )
+                if (motion.entered) currentEntered()
+                previous = now
+            }
+        }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         val brandWidth = (maxWidth - 56.dp).coerceAtLeast(1.dp).coerceAtMost(444.dp)
@@ -234,9 +295,24 @@ private fun HomeBrandToolbar(
             Modifier.fillMaxWidth().heightIn(min = 64.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.weight(1f)) {
+            Box(
+                Modifier.weight(1f).heightIn(min = 48.dp).then(titleInteraction)
+                    .drawBehind {
+                        if (pressLight > 0f) {
+                            val glowCenter = Offset(size.width * .5f, size.height * .45f)
+                            scale(1f, .24f, pivot = glowCenter) {
+                                drawCircle(Brush.radialGradient(
+                                    listOf(Gold.copy(alpha = .16f * pressLight), Color.Transparent),
+                                    center = glowCenter, radius = size.width * .6f,
+                                ), radius = size.width * .6f, center = glowCenter)
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.CenterStart,
+            ) {
                 Image(
                     painter = painterResource(R.drawable.openrhodes_wordmark),
+                    colorFilter = ColorFilter.tint(LabelInk),
                     contentDescription = null,
                     modifier =
                         Modifier.width(brandWidth)
@@ -248,74 +324,81 @@ private fun HomeBrandToolbar(
                             .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                             .drawWithContent {
                                 drawContent()
-                                // Tint only existing glyph pixels. Draw the underline afterward so
-                                // neither its entrance nor its refresh sweep shares this highlight.
-                                drawRect(
-                                    Color.Black.copy(alpha = .12f),
-                                    blendMode = BlendMode.SrcAtop,
-                                )
-                                val center = titleWidth * sheenPosition
+                                // 按住时字面轻微染暖，与背后的柔光一起反馈触摸。
+                                if (pressLight > 0f) {
+                                    drawRect(Gold.copy(alpha = .22f * pressLight),
+                                        blendMode = BlendMode.SrcAtop)
+                                }
+                                val center = titleWidth * rule.sheenPosition
                                 val bandWidth = titleWidth * .30f
                                 drawRect(
                                     brush =
                                         Brush.linearGradient(
                                             0f to Color.Transparent,
-                                            .5f to Color.White.copy(alpha = .90f),
+                                            .5f to (if (LightAppearance) Muted else Color.Black).copy(alpha = .48f * rule.sheenAlpha),
                                             1f to Color.Transparent,
                                             start = Offset(center - bandWidth / 2f, size.height),
                                             end = Offset(center + bandWidth / 2f, 0f),
                                         ),
                                     blendMode = BlendMode.SrcAtop,
                                 )
-                                val entrance = underlineEntrance().coerceIn(0f, 3f)
-                                val pull = refreshPull().coerceIn(0f, 1f)
-                                val height = 3.5.dp.toPx()
-                                val active = maxOf(pull, busyMix)
-                                clipRect(
-                                    left = 0f,
-                                    top = ruleTop,
-                                    right = titleWidth,
-                                    bottom = ruleTop + height,
-                                ) {
-                                    if (entrance < 3f && active == 0f) {
-                                        // Bright reveal, dark wipe, final bright reveal: every edge
-                                        // travels right.
-                                        val pass = entrance.toInt()
-                                        val edge = titleWidth * (entrance - pass)
-                                        val left = if (pass == 1) edge else 0f
-                                        val width = if (pass == 1) titleWidth - edge else edge
-                                        drawRect(Cream, Offset(left, ruleTop), Size(width, height))
-                                    } else {
+                                val height =
+                                    size.height *
+                                        (WordmarkGeometry.RuleHeight / WordmarkGeometry.Height)
+                                // 厚度向上扩展，保持布局高度与下边缘不变。
+                                val lineHeight = height * rule.thickness
+                                val lineTop = ruleTop + height - lineHeight
+                                clipRect(0f, lineTop, titleWidth, ruleTop + height) {
+                                    drawRect(
+                                        LabelInk.copy(alpha = rule.base),
+                                        Offset(0f, lineTop),
+                                        Size(titleWidth, lineHeight),
+                                    )
+                                    val bandLeft = titleWidth * rule.left
+                                    val bandRight = titleWidth * rule.right
+                                    if (bandRight > bandLeft) {
+                                        val flowing =
+                                            rule.mode == UnderlineMotion.Mode.Pull ||
+                                                rule.mode == UnderlineMotion.Mode.Release
                                         drawRect(
-                                            Cream.copy(
-                                                alpha = if (pull > 0f) .22f else 1f - .78f * busyMix
-                                            ),
-                                            Offset(0f, ruleTop),
-                                            Size(titleWidth, height),
-                                        )
-                                        if (pull > 0f)
-                                            drawRect(
-                                                Cream.copy(alpha = 1f - busyMix),
-                                                Offset(0f, ruleTop),
-                                                Size(titleWidth * pull, height),
-                                            )
-                                        if (busyMix > 0f) {
-                                            val width = titleWidth * .3f
-                                            val start = (titleWidth + width) * sweep.value - width
-                                            drawRect(
-                                                Brush.horizontalGradient(
-                                                    listOf(
-                                                        Cream.copy(alpha = 0f),
-                                                        Cream.copy(alpha = busyMix),
-                                                        Cream.copy(alpha = 0f),
+                                            Brush.horizontalGradient(
+                                                0f to
+                                                    LabelInk.copy(
+                                                        alpha = if (flowing) 0f else rule.bandAlpha
                                                     ),
-                                                    startX = start,
-                                                    endX = start + width,
+                                                .28f to LabelInk.copy(alpha = rule.bandAlpha),
+                                                1f to LabelInk.copy(alpha = rule.bandAlpha),
+                                                startX = bandLeft,
+                                                endX = bandRight,
+                                            ),
+                                            Offset(bandLeft, lineTop),
+                                            Size(bandRight - bandLeft, lineHeight),
+                                        )
+                                    }
+                                    fun glint(center: Float, width: Float, alpha: Float) {
+                                        if (alpha <= 0f) return
+                                        val start = titleWidth * (center - width / 2f)
+                                        val end = titleWidth * (center + width / 2f)
+                                        drawRect(
+                                            Brush.horizontalGradient(
+                                                listOf(
+                                                    Color.Transparent,
+                                                    Color.White.copy(alpha = alpha),
+                                                    Color.Transparent,
                                                 ),
-                                                Offset(start, ruleTop),
-                                                Size(width, height),
-                                            )
-                                        }
+                                                startX = start,
+                                                endX = end,
+                                            ),
+                                            Offset(start, lineTop),
+                                            Size(end - start, lineHeight),
+                                        )
+                                    }
+                                    glint(rule.glint, .18f, rule.glintAlpha)
+                                    clipRect(
+                                        left = titleWidth * rule.left,
+                                        right = titleWidth * rule.right,
+                                    ) {
+                                        glint(rule.right - .035f, .07f, rule.headAlpha)
                                     }
                                 }
                             },
@@ -336,55 +419,23 @@ private fun HomeBrandToolbar(
 }
 
 @Composable
-internal fun LightModeSelector(breathing: Boolean, enabled: Boolean, change: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(4.dp)
-            .selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        listOf(false to "常亮", true to "呼吸").forEach { (mode, label) ->
-            val selected = mode == breathing
-            Box(
-                Modifier.weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (selected) Gold.copy(alpha = if (enabled) .16f else .06f)
-                        else Color.Transparent
-                    )
-                    .selectable(selected, enabled, Role.RadioButton) { change(mode) }
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    label,
-                    color = (if (selected) Cream else Muted).copy(alpha = if (enabled) 1f else .5f),
-                    fontSize = 15.sp,
-                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SettingsEntry(title: String, subtitle: String, action: () -> Unit) {
+internal fun SettingsEntry(title: String, subtitle: String? = null, expanded: Boolean? = null, action: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = action)
-            .padding(vertical = 16.dp),
+            .heightIn(min = 48.dp)
+            .padding(vertical = if (subtitle == null) 4.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 16.sp, color = Cream)
-            Spacer(Modifier.height(4.dp))
-            Text(subtitle, fontSize = 12.sp, color = Muted)
+            if (subtitle != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(subtitle, fontSize = 12.sp, color = Muted)
+            }
         }
-        Canvas(Modifier.padding(start = 16.dp).size(18.dp)) {
+        Canvas(Modifier.padding(start = 16.dp).size(18.dp).graphicsLayer { rotationZ = if (expanded == true) 90f else 0f }) {
             val path =
                 Path().apply {
                     moveTo(size.width * .35f, size.height * .2f)
@@ -394,4 +445,11 @@ internal fun SettingsEntry(title: String, subtitle: String, action: () -> Unit) 
             drawPath(path, Muted, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
         }
     }
+}
+
+/** 矮窗口为两行成功说明及确认键预留空间，详情与过渡共用卡片尺寸。 */
+internal fun detailCardWidthLimit(height:androidx.compose.ui.unit.Dp,insets:androidx.compose.ui.unit.Dp,fontScale:Float):androidx.compose.ui.unit.Dp {
+    val header=maxOf(72.dp,(48*fontScale+12).dp)+16.dp
+    val reserved=(80+60*fontScale).dp
+    return maxOf(120.dp,(height-insets-header-reserved)*4/3)
 }

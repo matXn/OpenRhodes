@@ -59,6 +59,7 @@ object StateCodec {
             hardware,
             obj["ssid"]?.jsonPrimitive?.contentOrNull,
             obj["ip"]?.jsonPrimitive?.contentOrNull,
+            obj["firmware_version"]?.jsonPrimitive?.contentOrNull,
         )
     }
 
@@ -109,6 +110,7 @@ class LocalApi(
         fields: Map<String, String>? = null,
         control: Boolean = false,
     ): JsonObject {
+        require(!endpoint.isBluetooth) { "该设置需要连接灯具所在的 Wi-Fi 或配网热点" }
         val builder = Request.Builder().url(endpoint.url + path).header("Cache-Control", "no-store")
         if (fields != null || control) builder.header("X-Rhodes-Control", "1")
         if (fields != null)

@@ -38,6 +38,8 @@ class LampSession(
     private val queue = ArrayDeque<Pending>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private val io = Mutex()
+    private val refreshLock = Any()
+    private var bluetoothRefresh: Deferred<Unit>? = null
 
     private data class Verified(val endpoint: Endpoint, val state: LampState, val at: Long)
 
@@ -59,7 +61,10 @@ class LampSession(
                     var writeAttempted = false
                     try {
                         val after =
-                            withTimeoutOrNull(8000) {
+                            withTimeoutOrNull(
+                                if (lamp().endpoints.firstOrNull()?.isBluetooth == true) 30000
+                                else 8000
+                            ) {
                                 val (endpoint, before) =
                                     reach(reuse = next.command !is Command.Cycle)
                                 require(
@@ -123,6 +128,10 @@ class LampSession(
 
     private fun enqueue(command: Command, result: CompletableDeferred<LampState>?) {
         synchronized(queue) {
+            if (!scope.isActive) {
+                result?.completeExceptionally(CancellationException("灯具会话已结束"))
+                return
+            }
             if (command is Command.Power || command is Command.Mode || command is Command.Cycle) {
                 queue.removeIf { it.command is Command.Level && it.result == null }
             }
@@ -139,8 +148,24 @@ class LampSession(
         wake.trySend(Unit)
     }
 
-    /** Polls never wait behind a long request or overwrite an in-flight command. */
     suspend fun refresh(force: Boolean = false) {
+        if (lamp().endpoints.firstOrNull()?.isBluetooth != true) {
+            refreshOnce(force)
+            return
+        }
+        // 页面离开只停止等待。正在进行的加密查询由设备会话持有，
+        // 在原超时内完成；回来时加入同一次查询，删除设备仍会取消整个会话。
+        val pending = synchronized(refreshLock) {
+            bluetoothRefresh?.takeUnless { it.isCompleted }
+                ?: scope.async(start = CoroutineStart.LAZY) { refreshOnce(force) }
+                    .also { bluetoothRefresh = it }
+        }
+        pending.start()
+        pending.await()
+    }
+
+    /** Polls never wait behind a long request or overwrite an in-flight command. */
+    private suspend fun refreshOnce(force: Boolean) {
         var immediate = force
         while (currentCoroutineContext().isActive) {
             if (!immediate && clock() < nextPollAt) return
@@ -177,6 +202,11 @@ class LampSession(
     fun acceptDiscovered(endpoint: Endpoint, state: LampState) {
         checkIdentity(state)
         confirm(endpoint, state)
+    }
+
+    /** Wi-Fi / VPN 变化不使已经核验的蓝牙连接失效。 */
+    fun localNetworkChanged() {
+        if (lamp().endpoints.firstOrNull()?.isBluetooth != true) networkChanged()
     }
 
     fun networkChanged() {
@@ -218,6 +248,8 @@ class LampSession(
                 failure is IdentityMismatch -> "此地址对应另一盏灯，已停止控制；请更新地址"
                 failure is IllegalArgumentException && lamp().hardware == null ->
                     "旧记录的灯具身份尚未确认，请打开设备信息确认"
+                lamp().endpoints.firstOrNull()?.isBluetooth == true ->
+                    "蓝牙暂时无法连接：请开启蓝牙、允许附近设备权限并靠近灯具"
                 else -> "无法连接灯具：地址可能已变化，或手机与灯具不在同一局域网"
             }
         _observation.update {
@@ -244,13 +276,18 @@ class LampSession(
         }
         var last: Exception? = null
         // Total retry time is bounded, independent of address-history length.
-        return withTimeoutOrNull(6500) {
+        return withTimeoutOrNull(
+            if (lamp().endpoints.firstOrNull()?.isBluetooth == true) 22000 else 6500
+        ) {
             // Discovery and the last successful response outrank historical address order.
             val preferred = verified.get()?.endpoint
             val candidates = (listOfNotNull(preferred) + lamp().endpoints).distinct()
             for (endpoint in candidates) {
                 try {
-                    val state = withTimeoutOrNull(2200) { transport.read(endpoint) } ?: continue
+                    val state =
+                        withTimeoutOrNull(if (endpoint.isBluetooth) 20000 else 2200) {
+                            transport.read(endpoint)
+                        } ?: continue
                     checkIdentity(state)
                     return@withTimeoutOrNull endpoint to state
                 } catch (cancel: CancellationException) {

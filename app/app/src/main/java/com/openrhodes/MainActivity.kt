@@ -26,10 +26,18 @@ open class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         requestedId.value =
             intent.getStringExtra("deviceId") ?: savedInstanceState?.getString("deviceId")
-        setContent { RhodesRoot(app, requestedId) }
+        setContent {
+            val light = com.openrhodes.ui.Appearance.light
+            androidx.compose.runtime.DisposableEffect(light) {
+                val bars = if (light) androidx.activity.SystemBarStyle.light(0, 0)
+                    else androidx.activity.SystemBarStyle.dark(0)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+                onDispose { }
+            }
+            RhodesRoot(app, requestedId)
+        }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 try {

@@ -30,6 +30,7 @@ fun ConnectionRecovery(
     var provisioning by remember(lamp.id) { mutableStateOf(false) }
     val healthy = observation.state != null && observation.error == null && !observation.connecting
     if (healthy && !management) return
+    if (!management) ConnectionMethod(app, lamp)
     if (observation.connecting && !management) {
         if (observation.state == null) {
             Spacer(Modifier.height(20.dp))
@@ -48,7 +49,12 @@ fun ConnectionRecovery(
             Text("正在连接灯具…", color = Muted, fontSize = 13.sp)
         } else if (!healthy) {
             Text("灯具暂时无法连接", color = Cream, fontSize = 15.sp)
-            Text("正在按灯具身份查找连接，请确认手机与灯具处于同一网络。", color = Muted, fontSize = 13.sp)
+            Text(
+                if (lamp.endpoints.firstOrNull()?.isBluetooth == true) "请开启手机蓝牙、允许附近设备权限，并靠近灯具。"
+                else "正在按灯具身份查找连接，请确认手机与灯具处于同一网络。",
+                color = Muted,
+                fontSize = 13.sp,
+            )
         } else Text("连接管理", color = Muted, fontSize = 13.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(
@@ -62,7 +68,9 @@ fun ConnectionRecovery(
             }
             if (!healthy) TextButton(onClick = { provisioning = true }) { Text("重新配网") }
         }
-        if (!healthy && !observation.connecting)
+        if (
+            !healthy && !observation.connecting && lamp.endpoints.firstOrNull()?.isBluetooth != true
+        )
             TextButton(
                 onClick = { context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
                 contentPadding = PaddingValues(vertical = 8.dp),
@@ -71,7 +79,7 @@ fun ConnectionRecovery(
             }
     }
     TextButton(onClick = { advanced = !advanced }) { Text("高级连接信息") }
-    if (advanced) {
+    ExpandingSection(advanced) {
         observation.error?.let { Text(it, color = Muted, fontSize = 12.sp) }
         Text(localAddressSummary(context), color = Muted, fontSize = 13.sp)
         TextButton(onClick = { editingAddress = true }) { Text("手动更新地址") }
@@ -89,11 +97,11 @@ private fun AddressDialog(app: RhodesApp, lamp: Lamp, close: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = { if (!busy) close() },
-        title = { Text("更新灯具地址") },
+        title = { DialogMotion(); Text("更新灯具地址") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("输入灯具当前 IP。验证 MAC 后更新原设备，小组件绑定会保留。", color = Muted)
-                OutlinedTextField(
+                ConnectionField(
                     address,
                     { address = it },
                     enabled = !busy,

@@ -37,10 +37,42 @@ import org.robolectric.shadows.ShadowSystemClock
 
 /** Render the actual Compose components through Android/Skia, not an HTML facsimile. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = Application::class, qualifiers = "w393dp-h852dp-xhdpi")
+@Config(sdk = [34], application = Application::class, qualifiers = "w393dp-h852dp-night-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ControlVisualTest {
     @get:Rule val compose = createEmptyComposeRule()
+
+    @Test(timeout = 60000) fun compactNameAndFirstAddHintDoNotChangeNormalControls() {
+        compose.mainClock.autoAdvance = false
+        ShadowChoreographer.setPaused(false)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
+        var hint by mutableFloatStateOf(0f)
+        var taps = 0
+        val original = "RhodesLight-EC2F3C"
+        try {
+            controller.get().setContent { RhodesTheme {
+                Column {
+                    LampToolbar(lampDisplayName(original), null, {}, {}, largeTitle = true)
+                    LampCard(LampState(true, 36), true, {}, { taps++ },
+                        displayName=original, gestureHintAlpha=hint)
+                }
+            } }
+            compose.mainClock.advanceTimeBy(32)
+            compose.waitForIdle()
+            compose.onAllNodesWithText("RhodesLight").assertCountEquals(2)
+            compose.onNodeWithText(original).assertDoesNotExist()
+            compose.onNodeWithText("滑动调光\n轻点开关").assertDoesNotExist()
+            compose.runOnIdle { hint=1f }
+            compose.mainClock.advanceTimeBy(32)
+            compose.onNodeWithText("滑动调光\n轻点开关").assertIsDisplayed()
+            compose.runOnIdle { hint=0f }
+            compose.mainClock.advanceTimeBy(32)
+            compose.onNodeWithText("滑动调光\n轻点开关").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Rhodes Light").performTouchInput { click(center) }
+            assertEquals(1, taps)
+        } finally { controller.pause().stop().destroy() }
+    }
 
     private fun capture(
         name: String,
@@ -51,13 +83,14 @@ class ControlVisualTest {
         gestures: Boolean = false,
         live: Boolean = false,
     ) {
-        RuntimeEnvironment.setQualifiers("w${width}dp-h852dp-xhdpi")
+        RuntimeEnvironment.setQualifiers("w${width}dp-h852dp-night-xhdpi")
         RuntimeEnvironment.setFontScale(fontScale)
         compose.mainClock.autoAdvance = false
         ShadowChoreographer.setPaused(false)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
         val activity = controller.get()
+        com.openrhodes.ui.Appearance.update(activity.resources.configuration)
         var taps = 0
         val levels = mutableListOf<Int>()
         val modes = mutableListOf<Boolean>()
@@ -117,6 +150,7 @@ class ControlVisualTest {
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         assertTrue("Empty render", bitmap.getPixel(width, 400) != bitmap.getPixel(width, 1600))
         bitmap.recycle()
+        compose.onNodeWithText("滑动调光\n轻点开关").assertDoesNotExist()
         if (live) {
             val card = compose.onNodeWithContentDescription("Rhodes Light")
             compose.runOnUiThread {
@@ -156,13 +190,11 @@ class ControlVisualTest {
             val restingBounds = card.fetchSemanticsNode().boundsInRoot
             val plotMarkers = mutableListOf<Offset>()
             fun cardTop(phase: Double): Int {
-                compose.runOnUiThread {
-                    fixture.value =
-                        fixture.value.copy(
-                            phase = phase,
-                            sampledAt = android.os.SystemClock.elapsedRealtime(),
-                        )
-                }
+                // 沿真实时间轴前进到峰谷，不通过回报强行设置显示相位。
+                val currentPhase = fixture.value.phaseAt(android.os.SystemClock.elapsedRealtime())
+                val forward = ((phase - currentPhase) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)
+                val elapsed = (forward / (2 * Math.PI) * fixture.value.breath.periodMs).toLong()
+                ShadowSystemClock.advanceBy(Duration.ofMillis(elapsed))
                 compose.mainClock.advanceTimeBy(32)
                 compose.waitForIdle()
                 val rendered = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)

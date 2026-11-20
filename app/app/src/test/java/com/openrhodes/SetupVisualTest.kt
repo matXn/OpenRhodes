@@ -26,7 +26,7 @@ import org.robolectric.annotation.*
 import org.robolectric.shadows.*
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = RhodesApp::class, qualifiers = "w360dp-h800dp-xhdpi")
+@Config(sdk = [34], application = RhodesApp::class, qualifiers = "w360dp-h800dp-night-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SetupVisualTest {
     @get:Rule val compose = createEmptyComposeRule()
@@ -59,10 +59,10 @@ class SetupVisualTest {
                 override suspend fun enroll(
                     hardware: HardwareId,
                     endpoint: Endpoint,
-                    state: LampState?,
-                ) = "lamp"
+                    state: LampState,
+                    name: String,
+                ) = AddCompletion("lamp", true, state)
 
-                override suspend fun reachable(id: String) = false
 
                 override suspend fun legacyProof(
                     endpoint: Endpoint,
@@ -71,6 +71,7 @@ class SetupVisualTest {
             }
         fun radio() =
             object : ProvisionLink {
+                override val supportsLightControl = true
                 override suspend fun scan(found: (BlePeer) -> Unit) {
                     found(BlePeer("02:00:00:00:00:45", "RhodesLight", -55))
                 }
@@ -112,6 +113,8 @@ class SetupVisualTest {
                         View.MeasureSpec.makeMeasureSpec(1600, View.MeasureSpec.EXACTLY),
                     )
                     root.layout(0, 0, 720, 1600)
+                    compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
                     root.draw(Canvas(image))
                 }
                 assertEquals(
@@ -125,8 +128,15 @@ class SetupVisualTest {
                 image.recycle()
             }
             capture("setup-discover")
-            compose.onNodeWithText("RhodesLight · 0044").assertIsDisplayed().performClick()
+            compose.onNodeWithText("BLE").assertIsDisplayed()
+            compose.onNodeWithText("Wi-Fi").assertIsDisplayed().performClick()
+            compose.onNodeWithText("RhodesLight").assertIsDisplayed().performClick()
+            compose.mainClock.advanceTimeBy(3400)
+            ShadowLooper.idleMainLooper(3400,TimeUnit.MILLISECONDS)
+            compose.waitForIdle()
             capture("setup-networks")
+            compose.onNodeWithText("连接方式").assertDoesNotExist()
+            compose.onNodeWithContentDescription("确认名称并添加").assertDoesNotExist()
             compose.onNodeWithText("选择 Wi-Fi").assertIsDisplayed()
             compose.onNodeWithText("Wi-Fi 密码").assertDoesNotExist()
             compose.onNodeWithText("Home Network").performClick()

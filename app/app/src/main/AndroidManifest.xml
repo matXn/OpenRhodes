@@ -12,16 +12,17 @@
         android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.OpenRhodes" android:allowBackup="false"
         android:usesCleartextTraffic="true" android:supportsRtl="true">
-        <activity android:name="com.openrhodes.MainActivity" android:exported="true"
+        <activity android:name="com.openrhodes.MainActivity" android:configChanges="uiMode" android:exported="true"
             android:launchMode="singleTop" android:theme="@style/Theme.OpenRhodes.Starting" />
-        <activity android:name="com.pearlnode.MainActivity" android:exported="true"
+        <activity android:name="com.pearlnode.MainActivity" android:configChanges="uiMode" android:exported="true"
             android:launchMode="singleTop" android:theme="@style/Theme.OpenRhodes.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name="com.pearlnode.ui.widget.ShellyDeviceWidgetConfigActivity" android:exported="true">
+        <activity android:name="com.pearlnode.ui.widget.ShellyDeviceWidgetConfigActivity"
+            android:exported="true" android:theme="@style/Theme.OpenRhodes.WidgetPicker">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
         </activity>
         <receiver android:name="com.pearlnode.ui.widget.ShellyDeviceWidgetReceiver" android:exported="false" android:label="OpenRhodes">

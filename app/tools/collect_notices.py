@@ -69,10 +69,16 @@ for row in inventory:
 overview += ["", "Bundled license and notice texts", ""]
 for record in texts.values():
     overview += ["\n" + "=" * 72, *sorted(set(record["sources"])), "", record["text"]]
-# 字标使用 OFL 轮廓，重新收集依赖许可时也必须保留其来源说明。
-wordmark_license = ROOT / "artwork/LICENSE-Outfit.txt"
+# 字标由用户原图描摹；重新收集许可时保留本地来源及界面字体许可。
+wordmark_license = ROOT / "app/src/main/assets/fonts/polymath-demo-notice.txt"
 if wordmark_license.exists():
-    overview += ["", "Open Rhodes 字标：Outfit ExtraBold 轮廓，无嵌入字体文件。", "", wordmark_license.read_text(encoding="utf-8")]
+    overview += ["", "Open Rhodes 字标：Polymath Demo Bold 原始轮廓，本地实验构建，无嵌入字体文件。", "", wordmark_license.read_text(encoding="utf-8")]
+for family in ("manrope", "jost", "outfit"):
+    license_file = ROOT / f"app/src/main/assets/fonts/{family}-ofl.txt"
+    if license_file.exists():
+        overview += ["", f"Interface font: {family}",
+                     f"https://github.com/google/fonts/tree/main/ofl/{family}", "",
+                     license_file.read_text(encoding="utf-8")]
 asset.write_text("\n".join(overview) + "\n", encoding="utf-8")
 docs = ROOT / "docs/runtime-dependencies.json"
 docs.write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

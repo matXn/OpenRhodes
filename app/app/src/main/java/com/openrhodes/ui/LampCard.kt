@@ -12,11 +12,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -29,9 +34,13 @@ import androidx.compose.ui.unit.sp
 import com.openrhodes.domain.*
 import kotlin.math.*
 
-internal val Gold = Color(0xFFEEAC43)
-internal val Cream = Color(0xFFF4E8D1)
-internal val Muted = Color(0xFFA69981)
+internal val LightAppearance: Boolean get() = Appearance.light
+internal val PageColor: Color get() = if (LightAppearance) Color(0xFFF6F4F0) else Color.Black
+internal val GroupColor: Color get() = if (LightAppearance) Color.White else Color(0xFF1B1917)
+internal val LabelInk: Color get() = if (LightAppearance) Color(0xFF24211D) else Color.White
+internal val Gold: Color get() = if (LightAppearance) Color(0xFF865600) else Color(0xFFEEAC43)
+internal val Cream: Color get() = if (LightAppearance) LabelInk else Color(0xFFF4E8D1)
+internal val Muted: Color get() = if (LightAppearance) Color(0xFF6C6459) else Color(0xFFA69981)
 
 /** Two full swipes; 60% of travel is reserved for the bottom 30% of light. */
 fun slideBrightness(start: Int, travel: Float): Int {
@@ -50,6 +59,14 @@ fun LampCard(
     level: (Int) -> Unit,
     toggle: () -> Unit,
     connecting: Boolean = false,
+    modifier: Modifier = Modifier,
+    interactionEnabled: Boolean = true,
+    introProgress: Float? = null,
+    cardAspectRatio: Float = 4f / 3f,
+    introFinalWidthDp: Float? = null,
+    displayName: String = "Rhodes Light",
+    gestureHintAlpha: Float = 0f,
+    sharedFrame: CardFrame? = null,
 ) {
     var pressed by remember { mutableStateOf(false) }
     var x by remember { mutableFloatStateOf(0f) }
@@ -71,11 +88,9 @@ fun LampCard(
         )
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     val current by rememberUpdatedState(state)
-    var breathPhase by remember { mutableDoubleStateOf(state.phaseAt(now)) }
     LaunchedEffect(Unit) {
         while (true) withFrameMillis {
             now = SystemClock.elapsedRealtime()
-            if (current.on && current.breathing) breathPhase = current.phaseAt(now)
         }
     }
     val drift by
@@ -84,19 +99,25 @@ fun LampCard(
             tween(if (pressed) 100 else 450),
             label = "breathCardDrift",
         )
-    val sway = sin(breathPhase).toFloat() * drift
-    val lift = cos(breathPhase).toFloat() * drift
-    val rx = touchRx + sway * 1.2f
-    val ry = touchRy + lift * 1.1f
     val presentation = remember { CardPresentation() }
-    val frame = presentation.sample(state, now)
-    val energy = frame.energy
+    val displayNow = if (introProgress != null)
+        state.sampledAt + (introProgress * AddSuccessTiming.DURATION).coerceAtMost(1000f).toLong()
+    else now
+    val frame = sharedFrame ?: presentation.sample(state, displayNow)
+    val sway = sin(frame.phase).toFloat() * drift
+    val lift = cos(frame.phase).toFloat() * drift
+    val rx = if (introProgress != null) AddSuccessTiming.x(introProgress) + sway * 1.2f * AddSuccessTiming.chrome(introProgress) else touchRx + sway * 1.2f
+    val ry = if (introProgress != null) AddSuccessTiming.y(introProgress) + lift * 1.1f * AddSuccessTiming.chrome(introProgress) else touchRy + lift * 1.1f
+    val mix = introProgress?.let(AddSuccessTiming::chrome) ?: 0f
+    val energy = if (introProgress == null) frame.energy else frame.energy * (1-mix) + BreathVisual.cardEnergy(state, now) * mix
     val lighting = CardLighting.surface(energy, state.on)
     val surface = Color.hsl(lighting.hue, lighting.saturation, lighting.body)
     val core = Color.hsl(lighting.hue, lighting.saturation, lighting.core)
     val inkColors = remember(energy) { cardInk(energy) }
-    val inkTop by animateColorAsState(inkColors[0], tween(120), label = "inkTop")
-    val inkBottom by animateColorAsState(inkColors[1], tween(120), label = "inkBottom")
+    val animatedInkTop by animateColorAsState(inkColors[0], tween(120), label = "inkTop")
+    val animatedInkBottom by animateColorAsState(inkColors[1], tween(120), label = "inkBottom")
+    val inkTop=if(introProgress!=null)inkColors[0] else animatedInkTop
+    val inkBottom=if(introProgress!=null)inkColors[1] else animatedInkBottom
     val ink =
         remember(inkTop, inkBottom) {
             Brush.linearGradient(listOf(inkTop, inkBottom))
@@ -107,38 +128,70 @@ fun LampCard(
     val outputText =
         if (!state.on) "关"
         else if (live) "${frame.output.roundToInt()}%" else "${state.brightness}%"
+    val reflectionStart=remember {System.currentTimeMillis()}
+    val liveReflection=System.currentTimeMillis()
+    val frozenReflection=reflectionStart+(introProgress?.times(AddSuccessTiming.DURATION) ?: 0f).coerceAtMost(1000f).toLong()
+    val period=CardLighting.LIGHT_PERIOD_MS
+    val reflectionDelta=((liveReflection-frozenReflection+period/2)%period+period)%period-period/2
+    val reflectionNow=if(introProgress==null)liveReflection else frozenReflection+(reflectionDelta*mix).toLong()
     BoxWithConstraints(
-        Modifier.fillMaxWidth()
-            .aspectRatio(4f / 3f)
+        modifier.fillMaxWidth()
+            .aspectRatio(cardAspectRatio)
             .semantics {
                 contentDescription = "Rhodes Light"
                 stateDescription =
                     (if (connecting) "正在连接，" else if (!online) "离线，" else "") +
                         (if (state.on) outputText else "关灯") +
                         (if (state.breathing) "，呼吸，上限 ${state.brightness}%" else "")
-                if (!online) disabled()
+                if (!online || !interactionEnabled) disabled()
                 progressBarRangeInfo =
                     ProgressBarRangeInfo(if (state.on) state.brightness.toFloat() else 0f, 0f..100f)
                 setProgress {
-                    if (online) change(it.roundToInt())
-                    online
+                    if (online && interactionEnabled) change(it.roundToInt())
+                    online && interactionEnabled
                 }
                 onClick {
-                    if (online) tap()
-                    online
+                    if (online && interactionEnabled) tap()
+                    online && interactionEnabled
                 }
             }
-            .graphicsLayer {
-                rotationX = rx
-                rotationY = ry
-                rotationZ = sway * .6f
-                translationY = -lift * 3.dp.toPx()
-                cameraDistance = CardLighting.CAMERA_DISTANCE_DP * density
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
-                clip = true
+            .drawWithContent {
+                if (introProgress == null) drawContent() else {
+                    // 显式 X→Y→Z 投影，硬件画布与离屏渲染共用同一几何模型。
+                    val ax=Math.toRadians(rx.toDouble());val ay=Math.toRadians(ry.toDouble())
+                    val az=Math.toRadians((AddSuccessTiming.z(introProgress)+sway*.6f*AddSuccessTiming.chrome(introProgress)).toDouble())
+                    val source=floatArrayOf(0f,0f,size.width,0f,size.width,size.height,0f,size.height)
+                    val dest=FloatArray(8);val distance=4*size.height
+                    for(i in 0..3) {
+                        val x=source[i*2]-size.width/2;val y=source[i*2+1]-size.height/2
+                        val yy=y*cos(ax);val zz=y*sin(ax)
+                        val xx=x*cos(ay)+zz*sin(ay);val z=-x*sin(ay)+zz*cos(ay)
+                        val scale=distance/(distance-z)
+                        dest[i*2]=(size.width/2+(xx*cos(az)-yy*sin(az))*scale).toFloat()
+                        dest[i*2+1]=(size.height/2+(xx*sin(az)+yy*cos(az))*scale).toFloat()
+                    }
+                    val matrix=android.graphics.Matrix().apply { setPolyToPoly(source,0,dest,0,4) }
+                    drawIntoCanvas { canvas ->
+                        val native=canvas.nativeCanvas;native.save();native.concat(matrix)
+                        drawContent();native.restore()
+                    }
+                }
             }
-            .pointerInput(online) {
-                if (!online) return@pointerInput
+            .then(if (introProgress == null) Modifier.graphicsLayer {
+                rotationX=rx;rotationY=ry;rotationZ=sway*.6f
+                translationY=-lift*3.dp.toPx()
+                cameraDistance=CardLighting.CAMERA_DISTANCE_DP*density
+                shape=androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
+                clip=true
+            } else Modifier.offset { androidx.compose.ui.unit.IntOffset(0,(-lift*3.dp.toPx()*AddSuccessTiming.chrome(introProgress)).roundToInt()) })
+            .drawWithContent {
+                if (introProgress == null) drawContent() else {
+                    val outline=Path().apply { addRoundRect(RoundRect(Rect(Offset.Zero,size),CornerRadius(28.dp.toPx()))) }
+                    clipPath(outline) { this@drawWithContent.drawContent() }
+                }
+            }
+            .pointerInput(online, interactionEnabled) {
+                if (!online || !interactionEnabled) return@pointerInput
                 awaitEachGesture {
                     val first = awaitFirstDown(requireUnconsumed = false)
                     first.consume()
@@ -190,7 +243,7 @@ fun LampCard(
         Canvas(Modifier.matchParentSize()) {
             drawRect(Brush.radialGradient(listOf(core, surface)))
             val orbit =
-                (System.currentTimeMillis() % CardLighting.LIGHT_PERIOD_MS) /
+                (reflectionNow % CardLighting.LIGHT_PERIOD_MS) /
                     CardLighting.LIGHT_PERIOD_MS.toDouble() * 2 * PI
             val lightX = .5f * sin(orbit).toFloat()
             val lightY = -.18f + .36f * cos(orbit).toFloat()
@@ -228,20 +281,21 @@ fun LampCard(
             )
         }
         val fontScale = LocalDensity.current.fontScale
-        val normalSize = ((maxWidth.value - 40f) / fontScale * .25f).coerceIn(32f, 62f)
+        val normalSize = (((introFinalWidthDp ?: maxWidth.value) - 40f) / fontScale * .25f).coerceIn(32f, 62f)
         Row(
             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                "Rhodes Light",
-                Modifier.weight(1f).floatingInk(rx, ry, 26f),
+                lampDisplayName(displayName),
+                Modifier.weight(1f).wrapContentWidth(Alignment.Start)
+                    .particleScan(introProgress?.let(AddSuccessTiming::transfer) ?: 1f).floatingInk(rx, ry, 26f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(brush = ink, fontSize = 24.sp, fontWeight = FontWeight.SemiBold),
             )
-            GlassStatusLight(online, connecting)
+            GlassStatusLight(online, connecting, introProgress?.let(AddSuccessTiming::status) ?: 1f)
         }
         if (!state.breathing)
             Row(
@@ -253,26 +307,36 @@ fun LampCard(
                     TextStyle(
                         brush = ink,
                         fontSize = normalSize.sp,
-                        fontWeight = FontWeight.Light,
+                        fontFamily = BrightnessFont,
+                        fontWeight = FontWeight.ExtraLight,
                         fontFeatureSettings = "tnum",
                     )
                 Text(
                     outputText,
-                    Modifier.weight(1f).floatingInk(rx, ry, 36f),
+                    Modifier.weight(1f).leafLanding(introProgress, 1).floatingInk(rx, ry, 36f),
                     maxLines = 1,
                     softWrap = false,
                     style = numberStyle,
                 )
-                Text(
-                    if (online) "滑动调光\n轻点开关" else if (connecting) "正在连接" else "连接后调光",
-                    maxLines = 2,
-                    softWrap = false,
-                    modifier = Modifier.padding(bottom = 6.dp).floatingInk(rx, ry, 20f),
-                    style = TextStyle(brush = ink, fontSize = 12.sp, lineHeight = 17.sp),
-                )
+                val hintAlpha = if(introProgress != null) AddSuccessTiming.leaf(introProgress, 2) else gestureHintAlpha
+                if (!online || hintAlpha > 0f) {
+                    Text(
+                        if (online) "滑动调光\n轻点开关" else if (connecting) "正在连接" else "连接后调光",
+                        maxLines = 2,
+                        softWrap = false,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                            .graphicsLayer { alpha = if(online) hintAlpha else 1f }
+                            .floatingInk(rx, ry, 20f),
+                        style = TextStyle(brush = ink, fontSize = 12.sp, lineHeight = 17.sp),
+                    )
+                }
             }
     }
 }
+
+// 整组文字沿衰减弧线落位，保留字形与字距，不逐字拆散。
+private fun Modifier.leafLanding(progress: Float?, group: Int): Modifier =
+    if(progress==null)this else fadeContent(AddSuccessTiming.leaf(progress,group))
 
 /** Parallel text planes sit in front of the glass; the surface keeps its single reflection. */
 private fun Modifier.floatingInk(tiltX: Float, tiltY: Float, depthDp: Float) = graphicsLayer {
@@ -281,10 +345,10 @@ private fun Modifier.floatingInk(tiltX: Float, tiltY: Float, depthDp: Float) = g
 }
 
 @Composable
-private fun GlassStatusLight(online: Boolean, connecting: Boolean) {
+private fun GlassStatusLight(online: Boolean, connecting: Boolean, opacity: Float = 1f) {
     val color = if (connecting) Gold else if (online) Color(0xFF89BC87) else Color(0xFFD28B76)
     Canvas(
-        Modifier.size(28.dp).semantics {
+        Modifier.size(28.dp).graphicsLayer { alpha = opacity }.semantics {
             contentDescription = if (connecting) "正在连接" else if (online) "已连接" else "未连接"
         }
     ) {
@@ -343,11 +407,15 @@ private fun GlassStatusLight(online: Boolean, connecting: Boolean) {
 }
 
 @Composable
-fun BreathPlot(state: LampState) {
+fun BreathPlot(state: LampState, sharedFrame: CardFrame? = null) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {
         while (true) withFrameMillis { now = SystemClock.elapsedRealtime() }
     }
+    val presentation = remember { CardPresentation() }
+    val frame = sharedFrame ?: presentation.sample(state, now)
+    val currentFrame by rememberUpdatedState(frame)
+    val parameters = frame.breath
     Spacer(
         Modifier.fillMaxWidth()
             .height(96.dp)
@@ -356,19 +424,19 @@ fun BreathPlot(state: LampState) {
                 val window = BreathVisual.WINDOW_MS
                 val radius = 4.dp.toPx()
                 val width = size.width - 2 * radius
-                val cycleWidth = width * state.breath.periodMs / window
+                val cycleWidth = width * parameters.periodMs / window
                 fun y(level: Float) = size.height * (.94f - .86f * level)
                 val path = Path()
-                val cycles = ceil(window / state.breath.periodMs).toInt() + 1
+                val cycles = ceil(window / parameters.periodMs).toInt() + 1
                 for (i in 0..cycles * 128) {
                     val x = (i / 128.0 * cycleWidth).toFloat()
-                    val py = y(state.breath.wave(i / 128.0 * 2 * PI))
+                    val py = y(parameters.wave(i / 128.0 * 2 * PI))
                     if (i == 0) path.moveTo(x, py) else path.lineTo(x, py)
                 }
                 // Cache the repeated wave; each frame only translates it beneath the fixed x=0 dot.
                 onDrawBehind {
-                    val time = if (state.on) now else state.sampledAt
-                    val offset = (BreathVisual.scrollFraction(state, time) * width).toFloat()
+                    val phase = currentFrame.phase
+                    val offset = (BreathVisual.scrollFraction(parameters, phase) * width).toFloat()
                     drawLine(
                         Muted.copy(alpha = .25f),
                         Offset(radius, size.height * .94f),
@@ -383,7 +451,7 @@ fun BreathPlot(state: LampState) {
                         drawCircle(
                             Cream,
                             radius,
-                            Offset(radius, y(state.breath.wave(state.phaseAt(time)))),
+                            Offset(radius, y(parameters.wave(phase))),
                         )
                     }
                 }

@@ -1,42 +1,63 @@
 package com.openrhodes.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
-import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextGeometricTransform
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Velocity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openrhodes.RhodesApp
 import com.openrhodes.domain.*
-import kotlin.math.roundToInt
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -46,38 +67,48 @@ fun RhodesRoot(app: RhodesApp, requested: MutableStateFlow<String?>) {
     val lamps by app.catalog.lamps.collectAsStateWithLifecycle()
     val startup by app.startup.collectAsStateWithLifecycle()
     val requestedId by requested.collectAsStateWithLifecycle()
+    var success by remember { mutableStateOf<AddCompletion?>(null) }
+    var firstAddHint by remember { mutableStateOf<String?>(null) }
+    var successProgress by remember { mutableFloatStateOf(0f) }
+    var headerBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var cardBounds by remember { mutableStateOf<Rect?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var adding by rememberSaveable { mutableStateOf(false) }
-    var information by rememberSaveable { mutableStateOf(false) }
-    var setup by rememberSaveable { mutableStateOf(false) }
-    var showNotices by remember { mutableStateOf(false) }
+    var settingsPage by rememberSaveable { mutableStateOf<DeviceSettingsPage?>(null) }
     var wordmarkEntered by rememberSaveable { mutableStateOf(false) }
-    val underlineEntrance = remember { Animatable(if (wordmarkEntered) 3f else 0f) }
     val pullState = rememberPullToRefreshState()
     var refreshing by remember { mutableStateOf(false) }
+    var refreshRequest by remember { mutableIntStateOf(0) }
+    var homeDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) {
-        if (!wordmarkEntered) {
-            for (pass in 1..3) {
-                underlineEntrance.animateTo(
-                    pass.toFloat(),
-                    tween(800, easing = FastOutSlowInEasing),
-                )
-            }
-            wordmarkEntered = true
-        }
-    }
     LaunchedEffect(requestedId) {
         if (requestedId != null) {
             selected = requestedId
-            setup = false
-            information = false
+            settingsPage = null
             requested.value = null
         }
     }
     val lamp = selected?.let { id -> CatalogRules.resolve(lamps, id) }
+    LaunchedEffect(firstAddHint, selected, settingsPage, success) {
+        if (firstAddHint != null) {
+            if (selected != firstAddHint || settingsPage != null) firstAddHint = null
+            else if (success == null) {
+                delay(3000)
+                firstAddHint = null
+            }
+        }
+    }
+    LaunchedEffect(selected, lamp?.id, startup) {
+        if (selected != null && app.catalog.find(selected!!) == null && startup == null) {
+            selected = null
+            settingsPage = null
+            success = null
+        }
+    }
     val refreshHome: () -> Unit = {
         if (lamp == null && startup == null && !refreshing) {
+            refreshRequest++
             refreshing = true
             scope.launch {
                 try {
@@ -89,66 +120,88 @@ fun RhodesRoot(app: RhodesApp, requested: MutableStateFlow<String?>) {
                         }
                     }
                 } finally {
-                    refreshing = false
+                    try {
+                        // 空列表可能同帧完成。先让 Material3 观察到刷新状态，再触发回弹；
+                        // 网络结果不等待这里的两帧，也不人为延长光带动画。
+                        withFrameNanos {}
+                        withFrameNanos {}
+                    } finally {
+                        refreshing = false
+                    }
                 }
             }
         }
     }
-    BackHandler(selected != null || setup || information) {
+    fun back() {
         when {
-            setup -> setup = false
-            information -> information = false
+            success != null -> { success = null; selected = null }
+            settingsPage != null -> settingsPage = settingsPage?.back()
             else -> selected = null
         }
     }
+    // 添加页处理自己的返回。控制与设置页共享同一个返回导航入口。
+    if (!adding && (selected != null || settingsPage != null)) {
+        BackHandler(onBack = ::back)
+    }
+    val page = Triple(lamp?.id, settingsPage != null, adding)
+    val depth = when {
+        adding -> 1
+        lamp == null -> 0
+        settingsPage == null -> 1
+        else -> 2
+    }
     RhodesTheme {
+      SharedAddIdentity {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.safeDrawingPadding()) {
+            Box(Modifier.fillMaxSize().clipToBounds()
+                .pageArrival(page, depth, enabled = success == null)) {
+            val safe=WindowInsets.safeDrawing.asPaddingValues()
+            val cardWidthLimit=detailCardWidthLimit(LocalConfiguration.current.screenHeightDp.dp,safe.calculateTopPadding()+safe.calculateBottomPadding(),LocalDensity.current.fontScale)
+            Column(Modifier.safeDrawingPadding().graphicsLayer { alpha=if(adding)0f else 1f }
+                .then(if(adding)Modifier.clearAndSetSemantics {} else Modifier)) {
+                Box(Modifier.graphicsLayer { alpha = if(success == null) 1f else AddSuccessTiming.chrome(successProgress) }) {
                 LampToolbar(
                     title =
                         when {
                             lamp == null -> "Open Rhodes"
-                            setup -> "网络设置"
-                            information -> "设备设置"
-                            else -> lamp.name
+                            settingsPage != null -> DeviceSettingsPage.Menu.title
+                            else -> lampDisplayName(lamp.name)
                         },
-                    subtitle = if (lamp != null && (setup || information)) lamp.name else null,
-                    largeTitle = lamp != null && !setup && !information,
-                    back =
-                        if (lamp == null) null
-                        else
-                            ({
-                                when {
-                                    setup -> setup = false
-                                    information -> information = false
-                                    else -> selected = null
-                                }
-                            }),
+                    subtitle = null,
+                    largeTitle = lamp != null && settingsPage == null,
+                    onTitleBounds={headerBounds=it},
+                    back = if (lamp == null) null else ::back,
                     action =
                         if (lamp == null)
                             ({
                                 adding = true
                             })
-                        else if (!setup && !information) ({ information = true }) else null,
+                        else if (settingsPage == null && success == null) ({ settingsPage = DeviceSettingsPage.Menu }) else null,
                     actionGlyph = if (lamp == null) NavGlyph.Add else NavGlyph.Settings,
                     actionDescription = if (lamp == null) "添加灯具" else "设备设置",
                     prominent = lamp == null,
-                    underlineEntrance = { underlineEntrance.value },
-                    refreshPull = { pullState.distanceFraction },
+                    underlineEntrance = { if (wordmarkEntered) 3f else 0f },
+                    onUnderlineEntered = { wordmarkEntered = true },
+                    refreshPull = { if (homeDragging) pullState.distanceFraction else 0f },
+                    refreshRequest = refreshRequest,
                     refreshing = refreshing,
+                    onTitleClick = if (lamp == null && startup == null) refreshHome else null,
                 )
-                key(lamp?.id, setup, information) {
+                }
+                key(lamp?.id, settingsPage != null) {
                     HomeRefreshFrame(
                         enabled = lamp == null && startup == null,
                         modifier = Modifier.weight(1f),
                         refreshing = refreshing,
+                        dragging = homeDragging,
                         state = pullState,
                         onRefresh = refreshHome,
-                    ) {
+                        onDragging = { homeDragging = it },
+                    ) { pullFraction ->
                         Column(
                             Modifier.fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp)
+                                .verticalScroll(rememberScrollState(), enabled = success == null)
+                                .padding(horizontal = if(lamp!=null&&settingsPage == null)26.6667.dp else 20.dp)
                         ) {
                             Spacer(Modifier.height(if (lamp == null) 4.dp else 16.dp))
                             if (startup != null)
@@ -173,110 +226,178 @@ fun RhodesRoot(app: RhodesApp, requested: MutableStateFlow<String?>) {
                                 if (lamps.isEmpty())
                                     Button(onClick = { adding = true }) { Text("添加灯具") }
                                 lamps.forEach { row ->
-                                    LampRow(app, row) { selected = row.id }
+                                    LampRow(app, row, pullFraction, homeDragging, refreshing, open = { selected = row.id }, settings = {
+                                        selected = row.id
+                                        settingsPage = DeviceSettingsPage.Menu
+                                    })
                                     Spacer(Modifier.height(14.dp))
                                 }
-                            } else if (setup) WifiSetup(app, lamp)
-                            else if (information)
-                                LampInformation(
-                                    app,
-                                    lamp,
-                                    onSetup = { setup = true },
-                                    onNotices = { showNotices = true },
-                                )
-                            else LampControl(app, lamp)
+                            } else if (settingsPage != null)
+                                DeviceSettings(app, lamp, settingsPage!!,
+                                    navigate = { settingsPage = it })
+                            else LampControl(app, lamp,
+                                cardModifier = Modifier.widthIn(max=cardWidthLimit).align(Alignment.CenterHorizontally).onGloballyPositioned { cardBounds = it.boundsInRoot() }
+                                    .graphicsLayer { alpha = if (success == null) 1f else 0f },
+                                transition = success != null,
+                                showGestureHint = firstAddHint == lamp.id,
+                                connectionSettings = { settingsPage = DeviceSettingsPage.Connection },
+                                controlsAlpha = if (success == null) 1f else AddSuccessTiming.chrome(successProgress))
                             Spacer(Modifier.height(24.dp))
                         }
                     }
                 }
-                if (lamp == null || (!information && !setup)) ProjectCredit()
+                Box(Modifier.graphicsLayer { alpha = if(success == null) 1f else AddSuccessTiming.chrome(successProgress) }) {
+                    ProjectCredit()
+
+                }
+            }
+        if (adding)
+            BluetoothProvision(app, close = { adding = false }, embedded = true) { result ->
+                adding = false
+                selected = result.deviceId
+                firstAddHint = result.deviceId.takeIf { result.firstAdd }
+                cardBounds = null
+                successProgress = AddSuccessTiming.SAVED_START_MS / AddSuccessTiming.DURATION
+                success = result.takeIf { it.firstAdd && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+            }
+            val pending = success
+            if (pending != null && lamp != null) AddSuccessTransition(pending, lamp.name, cardBounds,headerTarget=headerBounds,
+                progress = { successProgress = it }, finished = { success = null })
             }
         }
-        if (adding)
-            BluetoothProvision(app, close = { adding = false }) { id ->
-                adding = false
-                selected = id
-            }
-        if (showNotices) ThirdPartyNotices { showNotices = false }
+      }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeRefreshFrame(
+internal fun HomeRefreshFrame(
     enabled: Boolean,
     modifier: Modifier,
     refreshing: Boolean,
+    dragging: Boolean,
     state: PullToRefreshState,
     onRefresh: () -> Unit,
-    content: @Composable () -> Unit,
+    onDragging: (Boolean) -> Unit,
+    content: @Composable (pullFraction: () -> Float) -> Unit,
 ) {
+    val currentDragging by rememberUpdatedState(onDragging)
     if (enabled) {
-        // 手势阈值、内容位移与横条进度共用 Material3 的归一化距离。
+        val currentRefreshing by rememberUpdatedState(refreshing)
+        val currentRefresh by rememberUpdatedState(onRefresh)
+        val scope = rememberCoroutineScope()
         val threshold = 64.dp
         val thresholdPx = with(LocalDensity.current) { threshold.toPx() }
+        var pullDistance by remember { mutableFloatStateOf(0f) }
+        // 内容和光带共用拖动距离；新下拉从此刻可见的回弹位置接手。
+        val contentOffset by
+            animateFloatAsState(
+                targetValue = if (dragging) pullDistance * 1.35f else 0f,
+                animationSpec =
+                    if (dragging) snap() else tween(320, easing = LinearOutSlowInEasing),
+                label = "homePullReturn",
+            )
+        val offsetAtThreshold = thresholdPx * 1.35f
+        val currentOffset by rememberUpdatedState(contentOffset)
+        val connection = remember(state, thresholdPx) {
+            object : NestedScrollConnection {
+                var pulling = false
+                var refreshBlocked = false
+
+                fun consume(delta: Float): Offset {
+                    if (!pulling) {
+                        pulling = true
+                        // 本次手势即使跨过网络完成，也不能重复请求。
+                        refreshBlocked = currentRefreshing
+                        pullDistance = currentOffset / 1.35f
+                        currentDragging(true)
+                    }
+                    val before = pullDistance
+                    pullDistance = (before + delta * .5f).coerceIn(0f, thresholdPx * 1.25f)
+                    val fraction = pullDistance / thresholdPx
+                    scope.launch { state.snapTo(fraction) }
+                    return Offset(0f, if (delta > 0f) delta else (pullDistance - before) / .5f)
+                }
+
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+                    if (source == NestedScrollSource.UserInput && pulling && available.y < 0f)
+                        consume(available.y)
+                    else Offset.Zero
+
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource,
+                ): Offset =
+                    // 子滚动容器先判定方向和 touch slop，并先滚动到顶部。
+                    if (source == NestedScrollSource.UserInput && available.y > 0f)
+                        consume(available.y)
+                    else Offset.Zero
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (!pulling) return Velocity.Zero
+                    pulling = false
+                    val consumed = if (pullDistance > 0f && available.y > 0f) available.y else 0f
+                    currentDragging(false)
+                    if (pullDistance > thresholdPx && !refreshBlocked && !currentRefreshing) currentRefresh()
+                    state.snapTo(0f)
+                    return Velocity(0f, consumed)
+                }
+            }
+        }
+        DisposableEffect(connection) {
+            onDispose { currentDragging(false) }
+        }
         Box(
             modifier
                 .clipToBounds()
-                .pullToRefresh(
-                    isRefreshing = refreshing,
-                    onRefresh = onRefresh,
-                    state = state,
-                    threshold = threshold,
-                )
+                .nestedScroll(connection)
         ) {
-            Box(
-                Modifier.fillMaxSize().offset {
-                    IntOffset(
-                        0,
-                        (thresholdPx * state.distanceFraction.coerceIn(0f, 1.25f)).roundToInt(),
-                    )
-                }
-            ) {
-                content()
+            Box(Modifier.fillMaxSize().graphicsLayer { translationY = contentOffset }) {
+                content { (contentOffset / offsetAtThreshold).coerceIn(0f, 1f) }
             }
         }
     } else {
-        Box(modifier) { content() }
+        Box(modifier) { content { 0f } }
     }
 }
 
 @Composable
-private fun ThirdPartyNotices(close: () -> Unit) {
-    val context = LocalContext.current
-    val text by
-        produceState("正在读取许可") {
-            value =
-                withContext(Dispatchers.IO) {
-                    context.assets.open("third-party-notices.txt").bufferedReader().use {
-                        it.readText()
-                    }
-                }
-        }
-    AlertDialog(
-        onDismissRequest = close,
-        title = { Text("第三方开源许可") },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 440.dp)) {
-                items(text.split("\n\n")) { Text(it, fontSize = 12.sp) }
-            }
-        },
-        confirmButton = { TextButton(onClick = close) { Text("关闭") } },
-    )
+internal fun homeConnectionColor(
+    pending: Boolean,
+    offline: Boolean,
+    dragging: Boolean,
+    refreshing: Boolean,
+    pullFraction: () -> Float,
+): State<Color> {
+    val gray = Color(0xFF767676)
+    val followPull = offline && dragging && !refreshing
+    val target = when {
+        pending || (offline && refreshing) -> gray
+        followPull -> lerp(Color(0xFFD28B76), gray, pullFraction())
+        offline -> Color(0xFFD28B76)
+        else -> Color(0xFF89BC87)
+    }
+    return animateColorAsState(target, if (followPull) snap() else tween(320), label = "connection color")
 }
 
 @Composable
-private fun LampRow(app: RhodesApp, lamp: Lamp, open: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun LampRow(
+    app: RhodesApp, lamp: Lamp, pullFraction: () -> Float,
+    dragging: Boolean, refreshing: Boolean, open: () -> Unit, settings: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var menu by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
     val session = remember(lamp.id, lamp.hardware) { app.session(lamp.id) }
     val observation by session.observation.collectAsStateWithLifecycle()
-    val macLabel = lamp.hardware?.displayTag ?: "#MAC 待确认"
-    val statusColor =
-        when {
-            observation.connecting -> Gold
-            observation.error != null -> Color(0xFFD28B76)
-            observation.state != null -> Color(0xFF89BC87)
-            else -> Muted
-        }
+    val macLabel = lamp.hardware?.displayTag?.removePrefix("#")?.let { "Mac:$it" } ?: "Mac:—"
+    val pending = observation.connecting || (observation.error == null && observation.state == null)
+    val offline = !pending && observation.error != null
+    val statusColor by homeConnectionColor(pending, offline, dragging, refreshing, pullFraction)
     val statusDescription =
         when {
             observation.connecting -> "正在连接"
@@ -285,42 +406,115 @@ private fun LampRow(app: RhodesApp, lamp: Lamp, open: () -> Unit) {
             else -> "尚未确认连接"
         }
     Surface(
-        Modifier.fillMaxWidth().clickable(onClick = open),
+        Modifier.fillMaxWidth().combinedClickable(onClick = open, onLongClick = { menu = true }),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    lamp.name,
-                    fontSize = 20.sp,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    macLabel,
-                    color = Muted,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = (-.3).sp,
-                    style =
-                        TextStyle(textGeometricTransform = TextGeometricTransform(scaleX = .96f)),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("设备设置") }, onClick = { menu = false; settings() })
+                DropdownMenuItem(text = { Text("删除灯具", color = MaterialTheme.colorScheme.error) },
+                    onClick = { menu = false; confirmDelete = true })
             }
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(10.dp).semantics { contentDescription = statusDescription }) {
-                    drawCircle(statusColor)
+            val compact = maxWidth < 320.dp
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        lampDisplayName(lamp.name),
+                        color = LabelInk,
+                        fontFamily = DeviceTitleFont,
+                        fontWeight = FontWeight.Light,
+                        fontSize = if (compact) 28.sp else 34.sp,
+                        letterSpacing = (-.8).sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        val glint = if (pending) rememberInfiniteTransition(label = "pending").animateFloat(
+                            initialValue = .15f, targetValue = .85f,
+                            animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Reverse),
+                            label = "reflection",
+                        ) else null
+                        Canvas(
+                            Modifier.size(10.dp).semantics {
+                                contentDescription = statusDescription
+                            }
+                        ) {
+                            drawCircle(statusColor)
+                            glint?.let {
+                                drawCircle(Brush.radialGradient(
+                                    listOf(Color.White.copy(alpha = .44f), Color.Transparent),
+                                    center = Offset(size.width * it.value, size.height * .36f),
+                                    radius = size.width * .58f,
+                                ))
+                            }
+                        }
+                        Text(
+                            macLabel,
+                            color = if (LightAppearance) Muted else Color(0xFFC6C3BB),
+                            fontFamily = AddressFont,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            letterSpacing = (-.35).sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                val reading = observation.state
+                Box(Modifier.clipToBounds(), contentAlignment = Alignment.CenterEnd) {
+                    if (reading == null) Text("—", color = Muted, fontSize = if (compact) 36.sp else 40.sp)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = reading != null,
+                        enter = slideInVertically(tween(260)) { it / 2 } + fadeIn(tween(220)),
+                    ) {
+                        Text(
+                            reading?.let { "${if (it.on) it.brightness else 0}%" }.orEmpty(),
+                            color = LabelInk,
+                            fontFamily = BrightnessFont,
+                            fontWeight = FontWeight.ExtraLight,
+                            fontSize = if (compact) 36.sp else 40.sp,
+                            letterSpacing = (-2).sp,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
         }
     }
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { if (!deleting) confirmDelete = false },
+        title = { DialogMotion(); Text("删除灯具？") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("从 App 中移除「${lamp.name}」及其本地设备记录。")
+            deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        } },
+        confirmButton = { TextButton(enabled = !deleting, onClick = {
+            deleting = true
+            scope.launch {
+                try { app.removeLamp(lamp.id) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (failure: Exception) { deleteError = failure.message ?: "删除失败，请重试" }
+                finally { deleting = false }
+            }
+        }) { Text(if (deleting) "正在删除…" else "删除") } },
+        dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDelete = false }) { Text("取消") } },
+    )
 }
 
 @Composable
-private fun LampControl(app: RhodesApp, lamp: Lamp) {
+private fun LampControl(app: RhodesApp, lamp: Lamp, cardModifier: Modifier = Modifier,
+    transition: Boolean = false, controlsAlpha: Float = 1f, showGestureHint: Boolean = false,
+    connectionSettings: () -> Unit) {
     val session = remember(lamp.id, lamp.hardware) { app.session(lamp.id) }
     val observation by session.observation.collectAsStateWithLifecycle()
     var localLevel by remember { mutableStateOf<Int?>(null) }
@@ -348,9 +542,30 @@ private fun LampControl(app: RhodesApp, lamp: Lamp) {
             else actual
         }
     val shown = localLevel?.let { visual.copy(on = it > 0, brightness = it) } ?: visual
+    // 灯板和状态球消费同一帧，拖动预览、设备回报与呼吸参数都只计算一次。
+    val lightPresentation = remember(lamp.id) { CardPresentation() }
+    val latestShown by rememberUpdatedState(shown)
+    // 拖动预览不是设备相位观测。确认前只按本地周期推进，确认后再缓慢校准。
+    val phaseObservation = if (breathEditor.value.dirty || breathEditor.value.dragging) null else actual
+    val latestPhaseObservation by rememberUpdatedState(phaseObservation)
+    var sharedLightFrame by remember(lamp.id) {
+        mutableStateOf(lightPresentation.sample(shown, android.os.SystemClock.elapsedRealtime()))
+    }
+    LaunchedEffect(lamp.id) {
+        while (true) withFrameMillis {
+            sharedLightFrame = lightPresentation.sample(latestShown,
+                android.os.SystemClock.elapsedRealtime(), latestPhaseObservation)
+        }
+    }
+    val hintAlpha by animateFloatAsState(if(showGestureHint) 1f else 0f, tween(250), label="firstAddHint")
     LampCard(
         shown,
         canControl,
+        displayName=lampDisplayName(lamp.name),
+        modifier = cardModifier,
+        interactionEnabled = !transition,
+        gestureHintAlpha = hintAlpha,
+        sharedFrame = sharedLightFrame,
         connecting = observation.connecting,
         level = {
             if (canControl) {
@@ -365,103 +580,28 @@ private fun LampControl(app: RhodesApp, lamp: Lamp) {
             }
         },
     )
+    Column(Modifier.graphicsLayer { alpha = controlsAlpha }) {
     Spacer(Modifier.height(24.dp))
-    LightModeSelector(actual.breathing, canControl) { session.submit(Command.Mode(it)) }
-    if (actual.breathing && canControl)
-        key(lamp.id) { BreathControls(session, actual, breathEditor) }
-    ConnectionRecovery(app, lamp, observation)
+    LightModeSelector(actual.breathing, canControl && !transition, sharedLightFrame.energy) { session.submit(Command.Mode(it)) }
+    AnimatedVisibility(
+        visible = actual.breathing && canControl && !transition,
+        enter = expandVertically(tween(320, easing = CubicBezierEasing(.22f, .61f, .36f, 1f))) +
+            fadeIn(tween(180, delayMillis = 100)),
+        exit = shrinkVertically(tween(320, easing = CubicBezierEasing(.22f, .61f, .36f, 1f))) +
+            fadeOut(tween(100)),
+    ) {
+        Column {
+            key(lamp.id) {
+                BreathControls(session, actual, breathEditor,
+                    actual.breathing && canControl && !transition, sharedFrame = sharedLightFrame)
+            }
+        }
+    }
+    if (!transition && !canControl && !(observation.connecting && observation.state != null)) {
+        Spacer(Modifier.height(20.dp))
+        Text(if(observation.connecting) "正在确认连接…" else "灯具暂时无法连接", color = Muted, fontSize = 13.sp)
+        TextButton(onClick = connectionSettings) { Text("连接设置") }
+    }
+    }
 }
 
-@Composable
-private fun LampInformation(
-    app: RhodesApp,
-    lamp: Lamp,
-    onSetup: () -> Unit,
-    onNotices: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var name by remember(lamp.id) { mutableStateOf(lamp.name) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var details by remember { mutableStateOf(false) }
-    val session = remember(lamp.id, lamp.hardware) { app.session(lamp.id) }
-    val observation by session.observation.collectAsStateWithLifecycle()
-    SettingsEntry("Wi-Fi 与配网", "保存的网络、热点与蓝牙配网", onSetup)
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Spacer(Modifier.height(20.dp))
-    BasicTextField(
-        name,
-        { name = it },
-        singleLine = true,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = Cream),
-        cursorBrush = SolidColor(Gold),
-        modifier =
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 8.dp).semantics {
-                contentDescription = "名称"
-            },
-        decorationBox = { input ->
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("名称", color = Muted, fontSize = 13.sp)
-                input()
-            }
-        },
-    )
-    TextButton(
-        contentPadding = PaddingValues(vertical = 8.dp),
-        onClick = {
-            scope.launch {
-                try {
-                    app.catalog.rename(lamp.id, name)
-                    message = "已保存"
-                } catch (e: Exception) {
-                    message = e.message
-                }
-            }
-        },
-    ) {
-        Text("保存名称")
-    }
-    SettingsEntry("设备详情", "硬件身份与历史连接地址") { details = !details }
-    if (details) {
-        Text("硬件身份", color = Muted, modifier = Modifier.padding(top = 16.dp))
-        Text(lamp.hardware?.value ?: "旧记录，尚未确认")
-        Text("保存的地址", color = Muted, modifier = Modifier.padding(top = 20.dp))
-        lamp.endpoints.forEach {
-            Text(
-                it.host + if (it == observation.endpoint) " · 上次成功连接" else " · 历史地址",
-                modifier = Modifier.padding(vertical = 5.dp),
-            )
-        }
-    }
-    if (lamp.hardware == null) {
-        Text("请确认当前首选地址确实是这盏灯。确认后将按完整 MAC 合并记录，并恢复控制。", color = Muted)
-        TextButton(
-            enabled = !busy,
-            onClick = {
-                busy = true
-                scope.launch {
-                    try {
-                        val endpoint = lamp.endpoints.first()
-                        val state = app.api.read(endpoint)
-                        val hardware = requireNotNull(state.hardware) { "固件尚未返回完整 MAC" }
-                        app.catalog.enroll(lamp.copy(hardware = hardware))
-                        message = "已确认 ${hardware.value}"
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (e: Exception) {
-                        message = e.message
-                    } finally {
-                        busy = false
-                    }
-                }
-            },
-        ) {
-            Text("确认当前地址对应此灯具")
-        }
-    }
-    message?.let { Text(it, color = Gold) }
-    Spacer(Modifier.height(12.dp))
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    ConnectionRecovery(app, lamp, observation, management = true)
-    SettingsEntry("第三方开源许可", "查看所用依赖的许可", onNotices)
-}

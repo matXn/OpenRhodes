@@ -2,7 +2,6 @@ package com.openrhodes.domain
 
 import com.openrhodes.data.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
 
@@ -27,6 +26,12 @@ enum class SetupPhase {
     DONE,
 }
 
+enum class SetupControlMethod { BLUETOOTH, WIFI }
+
+data class AddCompletion(val deviceId: String, val firstAdd: Boolean, val snapshot: LampState, val name: String = "Rhodes Light") {
+    init { require(snapshot.hardware != null) { "灯具身份尚未验证" } }
+}
+
 data class SetupUi(
     val phase: SetupPhase = SetupPhase.DISCOVER,
     val candidates: List<SetupCandidate> = emptyList(),
@@ -34,9 +39,11 @@ data class SetupUi(
     val network: SetupNetwork? = null,
     val busy: Boolean = false,
     val searching: Boolean = false,
+    val connection:ConnectionProgress?=null,
     val status: String? = null,
     val error: String? = null,
     val completedId: String? = null,
+    val completion: AddCompletion? = null,
 )
 
 interface ProvisioningGateway {
@@ -48,9 +55,17 @@ interface ProvisioningGateway {
 
     suspend fun read(endpoint: Endpoint): LampState
 
-    suspend fun enroll(hardware: HardwareId, endpoint: Endpoint, state: LampState? = null): String
+    suspend fun enroll(hardware: HardwareId, endpoint: Endpoint, state: LampState, name: String = "Rhodes Light"): AddCompletion
 
-    suspend fun reachable(id: String): Boolean
+    suspend fun adoptBluetooth(link: ProvisionLink, peer: BlePeer, hardware: HardwareId, name: String = "Rhodes Light"): AddCompletion =
+        error("BLE 暂不可用")
+
+
+    suspend fun verifyBluetooth(link: ProvisionLink, hardware: HardwareId): LampState {
+        val raw = link.request(byteArrayOf(0x10))
+        BleProvisionProtocol.identity(raw, hardware)
+        return StateCodec.decode(raw.toString(), 0)
+    }
 
     suspend fun legacyProof(endpoint: Endpoint, expected: HardwareId?): String?
 }
@@ -86,6 +101,7 @@ class ProvisioningFlow(
     private val expected: HardwareId? = null,
     private val reconfigure: Boolean = false,
     private val pollDelay: Long = 700,
+    private val discoveryRetryMs:Long=3000,
 ) : AutoCloseable {
     private val mutable = MutableStateFlow(SetupUi())
     val ui = mutable.asStateFlow()
@@ -94,10 +110,64 @@ class ProvisioningFlow(
     private var operation: Job? = null
     private var link: ProvisionLink? = null
     private var identity: HardwareId? = null
+    private var connectedState: JsonObject? = null
     private var selected: SetupCandidate? = null
     private var proof: String? = null
     private var bleAllowed = false
+    private var discoveryRequested = false
+    private var discoveryForeground = true
     private var closed = false
+    private var delivered = false
+    private var waitingEndpoint: Endpoint? = null
+    private var progressAttempt=0
+    private fun beginConnection(route:ConnectionRoute,label:String):Int {
+        val id=++progressAttempt
+        mutable.update {it.copy(connection=ConnectionProgress(id,route,label=label))}
+        return id
+    }
+    private fun reached(id:Int,value:Int,label:String) {
+        if(closed)return
+        mutable.update {val p=it.connection;if(p?.attempt==id)it.copy(connection=p.reached(value,label)) else it}
+    }
+    private fun milestone(id:Int,stage:BleConnectionMilestone)=reached(id,stage.percent,stage.nextLabel)
+    private suspend fun verifiedConnection(id:Int) {
+        currentCoroutineContext().ensureActive()
+        if(closed)return
+        mutable.update {val p=it.connection;if(p?.attempt==id)it.copy(connection=p.verified()) else it}
+        currentCoroutineContext().ensureActive()
+    }
+    private suspend fun secureLink(progressId: Int? = null): ProvisionLink {
+        link?.let { return it }
+        val candidate = requireNotNull(selected) { "请先选择灯具" }
+        val peer = requireNotNull(candidate.peer) { "请选择 Wi-Fi 连接这盏灯" }
+        val active = linkFactory()
+        try {
+            val raw = active.connect(peer, proof) { stage -> progressId?.let { milestone(it, stage) } }
+            val hardware = BleProvisionProtocol.identity(raw, expected ?: candidate.hardware)
+            identity = hardware
+            connectedState = raw
+            peers = peers.map { if (it.peer.address == peer.address) it.copy(hardware = hardware) else it }
+            rebuild()
+            link = active
+            return active
+        } catch (failure: Exception) { active.close(); throw failure }
+    }
+
+    private fun addName(hardware: HardwareId): String = gateway.name(hardware)
+        ?: selected?.name?.trim()?.take(48)?.takeIf { it.isNotEmpty() }
+        ?: "Rhodes Light"
+
+    fun takeCompletion(): AddCompletion? {
+        val result = mutable.value.completion ?: return null
+        if (delivered) return null
+        delivered = true
+        return result
+    }
+
+    private fun complete(result: AddCompletion) {
+        mutable.update { it.copy(phase = SetupPhase.DONE, completedId = result.deviceId,
+            completion = if (reconfigure) result.copy(firstAdd = false) else result, status = null) }
+    }
     private val nearbyJob = scope.launch {
         gateway.nearby.collect { rebuild() }
     }
@@ -110,82 +180,76 @@ class ProvisioningFlow(
         mutable.update { it.copy(candidates = rows) }
     }
 
-    fun search(allowBluetooth: Boolean) {
+    fun search(allowBluetooth: Boolean, restart:Boolean=false) = startDiscovery(allowBluetooth,restart,true)
+
+    fun pauseDiscovery() {
+        discoveryForeground=false
+        discovery?.cancel()
+        mutable.update {it.copy(searching=false)}
+    }
+
+    fun resumeDiscovery(allowBluetooth:Boolean) {
+        discoveryForeground=true
+        startDiscovery(allowBluetooth,false,false)
+    }
+
+    private fun startDiscovery(allowBluetooth:Boolean,restart:Boolean,clearError:Boolean) {
         if (closed || mutable.value.busy || mutable.value.phase != SetupPhase.DISCOVER) return
+        val samePermission=bleAllowed==allowBluetooth
         bleAllowed = allowBluetooth
+        discoveryRequested=true
+        if(!discoveryForeground)return
+        if(!restart&&samePermission&&discovery?.isActive==true)return
         val previous = discovery
         previous?.cancel()
         gateway.rescan()
         mutable.update {
             it.copy(
-                searching = allowBluetooth,
-                error = null,
+                searching = true,
+                connection=if(clearError)null else it.connection,
+                error = if(clearError)null else it.error,
                 status = if (allowBluetooth) "正在寻找附近的灯具…" else "正在寻找已联网的灯具…",
             )
         }
-        if (!allowBluetooth) return
-        discovery = scope.launch {
+        val next=scope.launch(start=CoroutineStart.LAZY) {
+            val ownJob=currentCoroutineContext()[Job]
+            fun eligible()=!closed&&discoveryForeground&&!mutable.value.busy&&mutable.value.phase==SetupPhase.DISCOVER
             try {
                 previous?.join()
-                mutable.update { it.copy(searching = true) }
-                coroutineScope {
-                    val queue = Channel<BlePeer>(Channel.UNLIMITED)
-                    val seen = mutableSetOf<String>()
-                    launch {
+                if(!eligible())return@launch
+                if(!allowBluetooth)awaitCancellation() // 局域网结果继续由 nearby 订阅提供。
+                while(isActive&&eligible()) {
+                    var failed=false
+                    try {
+                        // 一轮扫描结束或蓝牙暂未就绪时自动续搜；不探测连接，不清空已发现的行。
                         linkFactory().use { scanner ->
-                            try {
-                                scanner.scan { peer ->
-                                    if (seen.add(peer.address)) {
-                                        peers =
-                                            peers.filterNot { it.peer.address == peer.address } +
-                                                SetupPeer(peer, null)
-                                        rebuild()
-                                        queue.trySend(peer)
-                                    }
+                            scanner.scan { peer ->
+                                if(discovery===ownJob&&eligible()) {
+                                    val known = peers.firstOrNull { it.peer.address == peer.address }?.hardware
+                                    peers = peers.filterNot { it.peer.address == peer.address } + SetupPeer(peer, known)
+                                    rebuild()
                                 }
-                            } finally {
-                                queue.close()
                             }
                         }
+                        if(eligible())mutable.update {it.copy(status=if(it.candidates.isEmpty())"正在继续寻找附近的灯具…" else "选择要添加的灯具")}
+                    } catch(cancel:CancellationException) {throw cancel}
+                    catch(_:Exception) {
+                        failed=true
+                        if(eligible())mutable.update {it.copy(status="蓝牙暂不可用，正在自动重试；已联网的灯具仍会显示。")}
                     }
-                    for (peer in queue) {
-                        // A short encrypted read verifies station MAC; it never changes Wi-Fi.
-                        val hardware =
-                            try {
-                                withTimeoutOrNull(4500) {
-                                    linkFactory().use { probe ->
-                                        BleProvisionProtocol.identity(probe.connect(peer, proof))
-                                    }
-                                }
-                            } catch (cancel: CancellationException) {
-                                throw cancel
-                            } catch (_: Exception) {
-                                null
-                            } // Legacy firmware remains selectable.
-                        peers = peers.map {
-                            if (it.peer.address == peer.address) it.copy(hardware = hardware)
-                            else it
-                        }
-                        rebuild()
-                    }
+                    // 给系统扫描器留出间隔，避免频繁重启被限流；连接开始前由 action 取消并等待释放。
+                    delay(discoveryRetryMs.coerceAtLeast(1)*(if(failed)3 else 1))
                 }
-                mutable.update {
-                    it.copy(
-                        status = if (it.candidates.isEmpty()) "暂未找到灯具，请确认灯具已上电。" else "选择要添加的灯具"
-                    )
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Exception) {
-                mutable.update { it.copy(status = "蓝牙暂不可用，仍在寻找已联网的灯具。可在“没有找到灯具？”中重试。") }
             } finally {
-                mutable.update { it.copy(searching = false) }
+                if(discovery===ownJob)mutable.update {it.copy(searching=false)}
             }
         }
+        discovery=next
+        next.start()
     }
 
     private fun action(block: suspend () -> Unit) {
-        if (closed || mutable.value.busy) return
+        if (closed || mutable.value.busy || mutable.value.phase == SetupPhase.DONE || mutable.value.phase == SetupPhase.WAITING) return
         mutable.update { it.copy(busy = true, error = null) }
         operation = scope.launch {
             try {
@@ -199,6 +263,8 @@ class ProvisioningFlow(
                 disconnect(failure.message ?: "连接中断，请重新选择灯具")
             } finally {
                 mutable.update { it.copy(busy = false) }
+                if(discoveryRequested&&discoveryForeground&&mutable.value.phase==SetupPhase.DISCOVER)
+                    startDiscovery(bleAllowed,false,false)
             }
         }
     }
@@ -206,54 +272,88 @@ class ProvisioningFlow(
     private fun disconnect(message: String) {
         link?.close()
         link = null
-        mutable.update { it.copy(phase = SetupPhase.DISCOVER, error = message, status = null) }
+        mutable.update { it.copy(phase = SetupPhase.DISCOVER, error = message, status = null,connection=it.connection?.stopped()) }
     }
 
-    private suspend fun addLocal(endpoint: Endpoint, hardware: HardwareId?): Boolean {
-        val state =
-            try {
-                gateway.read(endpoint)
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Exception) {
-                return false
-            }
+    private suspend fun readLocal(endpoint: Endpoint): LampState? = try {
+        gateway.read(endpoint)
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (_: Exception) {
+        null
+    }
+
+    private suspend fun addLocal(endpoint: Endpoint, hardware: HardwareId?,connectionId:Int?=null,
+        snapshot: LampState? = null): Boolean {
+        val id=connectionId?:beginConnection(ConnectionRoute.LOCAL,"正在读取灯具状态")
+        val state = snapshot ?: readLocal(endpoint) ?: return false
+        reached(id,if(mutable.value.connection?.route==ConnectionRoute.WIFI)ConnectionWeights.WIFI_READ else ConnectionWeights.CONTROL_READ,"正在验证灯具身份")
         val actual = requireNotNull(state.hardware) { "灯具尚未提供完整身份，请升级固件" }
         require(hardware == null || actual == hardware) { "灯具身份已变化，请重新搜索" }
         require(expected == null || expected == actual) { "此地址对应另一盏灯" }
-        val id = gateway.enroll(actual, endpoint, state)
-        mutable.update { it.copy(phase = SetupPhase.DONE, completedId = id, status = null) }
+        val result = gateway.enroll(actual, endpoint, state, addName(actual))
+        verifiedConnection(id)
+        complete(result)
         return true
     }
 
-    fun select(candidate: SetupCandidate) = action {
+    fun select(candidate: SetupCandidate, method: SetupControlMethod = SetupControlMethod.BLUETOOTH) = action {
+        if (selected?.peer?.address != candidate.peer?.address || selected?.hardware != candidate.hardware) {
+            link?.close()
+            link = null
+            identity = null
+            connectedState = null
+            waitingEndpoint = null
+        }
         selected = candidate
         mutable.update { it.copy(status = "正在连接 ${candidate.name}…") }
-        if (
-            !reconfigure &&
-                candidate.endpoint != null &&
-                addLocal(candidate.endpoint, candidate.hardware)
-        )
-            return@action
-        val peer = candidate.peer ?: error("暂时无法连接这盏灯，请重新搜索或使用蓝牙配网")
-        link?.close()
-        val active = linkFactory().also { link = it }
-        val state = active.connect(peer, proof)
-        val hardware = BleProvisionProtocol.identity(state, expected ?: candidate.hardware)
-        identity = hardware
+        when (method) {
+            SetupControlMethod.BLUETOOTH -> connectBluetooth()
+            SetupControlMethod.WIFI -> connectWifi()
+        }
+    }
+
+    private suspend fun connectBluetooth() {
+        require(selected?.peer != null) { "这盏灯仅发现局域网地址，请在添加页选择 Wi-Fi" }
+        val progressId=beginConnection(ConnectionRoute.BLE,"正在连接灯具")
+        val active = secureLink(progressId)
+        check(active.supportsLightControl) { "此固件仅支持蓝牙配网，请选择 Wi-Fi" }
+        val hardware = requireNotNull(identity)
+        val verified = gateway.verifyBluetooth(active, hardware)
+        reached(progressId,90,"正在保存灯具")
+        require(verified.hardware == hardware)
+        val result = gateway.adoptBluetooth(active, requireNotNull(selected?.peer), hardware, addName(hardware))
+        // 所有权交给控制会话，关闭添加页面不能再断开这条连接。
+        link = null
+        verifiedConnection(progressId)
+        complete(result)
+    }
+
+    private suspend fun connectWifi() {
+        val candidate = requireNotNull(selected)
+        if (candidate.peer == null) {
+            val endpoint = requireNotNull(candidate.endpoint) { "请选择灯具或使用手动地址" }
+            check(addLocal(endpoint, candidate.hardware)) { "暂时无法访问灯具，请检查手机与灯具的网络" }
+            return
+        }
+        // 读取网络选项属于前置准备；用户提交网络后才启动连续的连接成功动效。
+        mutable.update { it.copy(phase = SetupPhase.NETWORKS, connection = null, status = "正在读取 Wi-Fi 网络…") }
+        secureLink()
+        val hardware = requireNotNull(identity)
         if (!reconfigure) {
-            val endpoints =
-                listOfNotNull(
-                        gateway.nearby.value[hardware],
-                        Endpoint.parse(state["ip"]?.jsonPrimitive?.contentOrNull.orEmpty()),
-                    )
-                    .distinct()
-            for (endpoint in endpoints) if (addLocal(endpoint, hardware)) return@action
+            val endpoints = listOfNotNull(gateway.nearby.value[hardware],
+                candidate.endpoint, waitingEndpoint,
+                Endpoint.parse(connectedState?.get("ip")?.jsonPrimitive?.contentOrNull.orEmpty())).distinct()
+            for (endpoint in endpoints) {
+                val state = readLocal(endpoint) ?: continue
+                if (addLocal(endpoint, hardware, snapshot = state)) return
+            }
         }
         scanNetworksNow()
     }
 
     fun manual(address: String) = action {
+        selected = null
         val endpoint = requireNotNull(Endpoint.parse(address)) { "请输入有效的局域网地址" }
         if (!addLocal(endpoint, expected)) error("无法访问该地址，请检查手机与灯具的网络")
     }
@@ -271,13 +371,15 @@ class ProvisioningFlow(
         mutable.update {
             it.copy(
                 phase = SetupPhase.NETWORKS,
+                connection=null,
                 network = null,
                 status = "正在扫描 Wi-Fi…",
                 error = null,
                 networks = emptyList(),
             )
         }
-        val active = requireNotNull(link)
+        val active = secureLink()
+        mutable.update {it.copy(connection=null,status="正在扫描 Wi-Fi…")}
         active.request(byteArrayOf(2))
         val rows = mutableListOf<SetupNetwork>()
         withTimeout(20000) {
@@ -350,6 +452,7 @@ class ProvisioningFlow(
             return
         }
         action {
+            val progressId=beginConnection(ConnectionRoute.WIFI,"正在提交网络设置")
             mutable.update { it.copy(phase = SetupPhase.JOINING, status = "正在连接 $ssid…") }
             val active = requireNotNull(link)
             val accepted =
@@ -360,6 +463,7 @@ class ProvisioningFlow(
                 }
             val attempt = requireNotNull(accepted["attempt_id"]?.jsonPrimitive?.intOrNull)
             check(accepted["accepted"]?.jsonPrimitive?.booleanOrNull == true)
+            reached(progressId,ConnectionWeights.WIFI_ACCEPTED,"正在等待灯具接入 Wi-Fi")
             withTimeout(40000) {
                 while (true) {
                     delay(pollDelay)
@@ -373,6 +477,7 @@ class ProvisioningFlow(
                             mutable.update {
                                 it.copy(
                                     phase = SetupPhase.PASSWORD,
+                                    connection=it.connection?.stopped(),
                                     network =
                                         (network ?: SetupNetwork(ssid, -100, true, false)).copy(
                                             saved = false
@@ -390,7 +495,8 @@ class ProvisioningFlow(
                                         status["ip"]?.jsonPrimitive?.contentOrNull.orEmpty()
                                     )
                                 )
-                            val id = gateway.enroll(hardware, endpoint)
+                            reached(progressId,ConnectionWeights.WIFI_ONLINE,"正在建立局域网连接")
+                            waitingEndpoint = endpoint
                             try {
                                 active.request(byteArrayOf(5))
                             } catch (cancel: CancellationException) {
@@ -404,7 +510,7 @@ class ProvisioningFlow(
                                 it.copy(
                                     phase = SetupPhase.WAITING,
                                     status = "灯具已连接 $ssid；正在建立局域网连接…",
-                                    completedId = id,
+
                                 )
                             }
                             gateway.rescan()
@@ -418,18 +524,13 @@ class ProvisioningFlow(
                 // Keep waiting while the user opens system Wi-Fi settings; never resubmit
                 // credentials.
                 while (currentCoroutineContext().isActive) {
-                    val reachable =
-                        try {
-                            gateway.reachable(requireNotNull(mutable.value.completedId))
-                        } catch (cancel: CancellationException) {
-                            throw cancel
-                        } catch (_: Exception) {
-                            false
-                        }
-                    if (reachable) {
-                        mutable.update { it.copy(phase = SetupPhase.DONE, status = null) }
-                        break
+                    val hardware = requireNotNull(identity)
+                    val endpoints = listOfNotNull(gateway.nearby.value[hardware], waitingEndpoint).distinct()
+                    var connected = false
+                    for (endpoint in endpoints) {
+                        if (addLocal(endpoint, hardware,progressId)) { connected = true; break }
                     }
+                    if (connected) break
                     mutable.update { it.copy(status = "灯具已联网，请将手机连接到 $ssid。连接恢复后会自动打开。") }
                     delay(2000)
                 }
@@ -442,11 +543,9 @@ class ProvisioningFlow(
         if (mutable.value.busy) return false
         when (mutable.value.phase) {
             SetupPhase.PASSWORD ->
-                mutable.update { it.copy(phase = SetupPhase.NETWORKS, error = null) }
+                mutable.update { it.copy(phase = SetupPhase.NETWORKS, error = null,connection=null) }
             SetupPhase.NETWORKS -> {
-                link?.close()
-                link = null
-                mutable.update { it.copy(phase = SetupPhase.DISCOVER, error = null) }
+                mutable.update { it.copy(phase = SetupPhase.DISCOVER, error = null,connection=null) }
                 search(bleAllowed)
             }
             else -> return false
@@ -456,6 +555,8 @@ class ProvisioningFlow(
 
     override fun close() {
         closed = true
+        discoveryRequested=false
+        discoveryForeground=false
         discovery?.cancel()
         operation?.cancel()
         nearbyJob.cancel()

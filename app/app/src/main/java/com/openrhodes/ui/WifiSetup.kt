@@ -1,253 +1,233 @@
 package com.openrhodes.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openrhodes.RhodesApp
+import com.openrhodes.data.WifiSettingsClient
 import com.openrhodes.domain.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 
+/** 统一连接页；网络操作仅走经过 MAC 验证的 HTTP 通道。 */
 @Composable
 fun WifiSetup(app: RhodesApp, lamp: Lamp) {
     val scope = rememberCoroutineScope()
-    var endpoint by remember(lamp.id) { mutableStateOf<Endpoint?>(null) }
-    var state by remember { mutableStateOf<JsonObject?>(null) }
-    var networks by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var ssid by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
+    val session = remember(lamp.id, lamp.hardware) { app.session(lamp.id) }
+    val observation by session.observation.collectAsStateWithLifecycle()
+    val client = remember(lamp.id, lamp.hardware) {
+        WifiSettingsClient(app.api, lamp.hardware) {
+            val current = session.observation.value
+            (listOfNotNull(
+                current.state?.deviceIp?.takeIf { it.isNotBlank() }?.let(Endpoint::parse),
+                lamp.hardware?.let { app.nearby.value[it] },
+                current.endpoint?.takeUnless { it.isBluetooth },
+            ) + app.catalog.find(lamp.id)?.endpoints.orEmpty() +
+                listOfNotNull(Endpoint.parse("192.168.4.1")))
+        }
+    }
+    var state by remember(lamp.id) { mutableStateOf<JsonObject?>(null) }
+    var message by remember(lamp.id) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
-    var bluetoothSetup by remember { mutableStateOf(false) }
-    var hotspotSettings by remember { mutableStateOf(false) }
-    var manual by remember { mutableStateOf(false) }
-    val connecting = state?.get("connecting")?.jsonPrimitive?.booleanOrNull == true
+    var adding by remember { mutableStateOf(false) }
+    var hidden by remember { mutableStateOf(false) }
+    var networks by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var ssid by remember { mutableStateOf<String?>(null) }
+    var password by remember { mutableStateOf("") }
+    var forgetting by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<String?>(null) }
+    var pendingAt by remember { mutableLongStateOf(0L) }
+    val connecting = pending != null || state?.get("connecting")?.jsonPrimitive?.booleanOrNull == true
 
-    suspend fun target(): Endpoint {
-        val session = app.session(lamp.id)
-        session.refresh(force = true)
-        val current = session.observation.value
-        check(current.error == null && current.state != null) { current.error ?: "灯具暂时无法连接" }
-        val found = requireNotNull(current.endpoint) { "灯具暂时无法连接" }
-        require(lamp.hardware != null && current.state.hardware == lamp.hardware) {
-            "灯具身份未确认"
-        }
-        endpoint = found
-        return found
+    fun accept(info: JsonObject) {
+        state = info
+        val connected = info["connected"]?.jsonPrimitive?.booleanOrNull == true
+        val network = info["ssid"]?.jsonPrimitive?.contentOrNull
+        val failure = info["wifi_error"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        if (pending != null && ((connected && network == pending) || failure != null)) pending = null
+        message = null
     }
-    fun action(path: String, fields: Map<String, String>) {
+    fun action(connectTo: String? = null, request: suspend () -> JsonObject) {
+        if (busy || scanning || connecting) return
         busy = true
+        message = null
         scope.launch {
             try {
-                state = app.api.json(target(), path, fields)
-                message = null
+                val response = request()
+                if (response.containsKey("on")) accept(response)
+                if (connectTo != null) {
+                    pending = connectTo
+                    pendingAt = SystemClock.elapsedRealtime()
+                    adding = false
+                    password = ""
+                    app.rescan()
+                }
             } catch (cancel: CancellationException) {
                 throw cancel
-            } catch (e: Exception) {
-                message = e.message
+            } catch (failure: Exception) {
+                message = failure.message ?: "网络设置暂时无法更新，请重试"
             } finally {
                 busy = false
             }
         }
     }
-    LaunchedEffect(lamp.id) {
-        while (isActive) {
+    fun scan() {
+        if (busy || scanning || connecting) return
+        scanning = true
+        message = null
+        scope.launch {
             try {
-                if (!busy && !scanning) {
-                    state = app.api.json(target(), "/api/wifi/setup", mapOf("action" to "hold"))
-                    message = null
-                }
+                networks = client.scan()
+                if (networks.isEmpty()) message = "未发现网络，可重新扫描或添加隐藏网络"
+            } catch (timeout: TimeoutCancellationException) {
+                message = "扫描超时，请重试"
             } catch (cancel: CancellationException) {
                 throw cancel
-            } catch (e: Exception) {
-                message = "连接暂时中断，正在查找灯具的新地址；请确认手机已连接目标 Wi-Fi"
+            } catch (failure: Exception) {
+                message = failure.message ?: "暂时无法扫描网络"
+            } finally {
+                scanning = false
             }
-            delay(10000)
         }
     }
-    LaunchedEffect(connecting) {
-        if (connecting) {
-            val completed =
-                withTimeoutOrNull(60000) {
-                    while (isActive) {
-                        delay(1500)
-                        try {
-                            state = app.api.json(target(), "/api/state")
-                        } catch (cancel: CancellationException) {
-                            throw cancel
-                        } catch (e: Exception) {
-                            message = "灯具正在切换网络，请将手机连接到目标 Wi-Fi；发现新地址后会恢复"
-                        }
-                    }
-                }
-            if (completed == null) message = "等待连接超时，请检查目标 Wi-Fi 或连接灯具热点重新配网"
+    LaunchedEffect(client) {
+        while (isActive) {
+            if (!busy && !scanning) {
+                try { accept(client.read()) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (failure: Exception) { message = failure.message ?: "暂时无法读取网络设置" }
+            }
+            if (pending != null && SystemClock.elapsedRealtime() - pendingAt > 60000) {
+                pending = null
+                message = "等待联网超时，请检查目标 Wi-Fi 或连接灯具配网热点"
+            }
+            delay(if (pending != null || state?.get("connecting")?.jsonPrimitive?.booleanOrNull == true) 1500 else 10000)
         }
     }
-    DisposableEffect(lamp.id) {
+    DisposableEffect(client) {
         onDispose {
-            endpoint?.let { host ->
-                app.scope.launch {
-                    try {
-                        app.api.json(host, "/api/wifi/setup", mapOf("action" to "release"))
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (_: Exception) {
-                        /* Firmware lease also expires after 45 seconds. */
-                    }
-                }
+            app.scope.launch {
+                try { client.release() }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { /* 灯具也会自动释放到期的设置租约。 */ }
             }
         }
     }
-    Button(onClick = { bluetoothSetup = true }) { Text("添加 Wi-Fi 网络") }
-    if (bluetoothSetup)
-        BluetoothProvision(app, lamp, close = { bluetoothSetup = false }) {
-            bluetoothSetup = false
-        }
-    state?.let { info ->
-        Text(
-            if (connecting) "正在连接 ${info["target_ssid"]?.jsonPrimitive?.contentOrNull.orEmpty()}"
-            else "当前网络：${info["ssid"]?.jsonPrimitive?.contentOrNull.orEmpty()}",
-            color = Muted,
-            modifier = Modifier.padding(vertical = 12.dp),
-        )
-        info["wifi_error"]
-            ?.jsonPrimitive
-            ?.contentOrNull
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+    SettingsSection(SettingsGlyph.Bluetooth, "蓝牙")
+    val direct = observation.endpoint?.isBluetooth ?: (lamp.endpoints.firstOrNull()?.isBluetooth == true)
+    val bluetoothStatus = when {
+        direct && observation.connecting -> "正在连接"
+        direct && observation.state != null && observation.error == null -> "已连接"
+        direct -> "未连接"
+        else -> "未使用"
     }
-    Text("已保存网络", color = Muted, modifier = Modifier.padding(top = 20.dp))
-    val profiles = state?.get("wifi_profiles")?.jsonArray.orEmpty()
-    profiles.forEachIndexed { index, item ->
-        val name = item.jsonObject["ssid"]?.jsonPrimitive?.content.orEmpty()
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(
-                enabled = !busy && !connecting,
-                onClick = { action("/api/wifi", mapOf("ssid" to name, "use_saved" to "1")) },
-                modifier = Modifier.weight(1f),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    "${index+1}. $name",
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-            }
-            if (index > 0)
+    Text(bluetoothStatus, color = Muted, fontSize = 14.sp)
+    HorizontalDivider(Modifier.padding(top = 24.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+    SettingsSection(SettingsGlyph.Wifi, "Wi-Fi 网络")
+    val currentName = state?.get("ssid")?.jsonPrimitive?.contentOrNull.orEmpty()
+    val joined = state?.get("connected")?.jsonPrimitive?.booleanOrNull == true
+    Text(when {
+        connecting -> "正在连接 ${pending ?: state?.get("target_ssid")?.jsonPrimitive?.contentOrNull.orEmpty()}"
+        joined && currentName.isNotBlank() -> currentName
+        state != null -> "尚未连接网络"
+        else -> "正在读取网络设置…"
+    }, fontSize = 16.sp)
+    if (joined && !connecting) Text("已连接", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+    state?.get("wifi_error")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let {
+        Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+    }
+    if (state != null) {
+        Text("已保存网络", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+        val profiles = state?.get("wifi_profiles")?.jsonArray.orEmpty()
+        if (profiles.isEmpty()) Text("暂无保存的网络", color = Muted, fontSize = 13.sp)
+        profiles.forEach { item ->
+            val name = item.jsonObject["ssid"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
-                    enabled = !busy && !connecting,
-                    onClick = {
-                        action(
-                            "/api/wifi/profiles",
-                            mapOf(
-                                "ssid" to name,
-                                "action" to "move",
-                                "priority" to index.toString(),
-                            ),
-                        )
-                    },
+                    enabled = !busy && !scanning && !connecting,
+                    onClick = { action(connectTo = name) { client.connect(name) } },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(vertical = 10.dp),
                 ) {
-                    Text("上移")
-                }
-        }
-    }
-    SettingsEntry("灯具配网热点", "隐藏热点名称、查看连接信息") { hotspotSettings = !hotspotSettings }
-    if (hotspotSettings) {
-        if (state?.containsKey("ap_hidden") == true) {
-            AccessPointSettings(
-                app = app,
-                lampId = lamp.id,
-                enabled = !busy && !scanning && !connecting,
-                target = { target() },
-                onBusy = { busy = it },
-            )
-        } else if (state != null) {
-            Text(
-                "升级灯具固件后可隐藏配网热点名称。",
-                color = Muted,
-                modifier = Modifier.padding(vertical = 12.dp),
-            )
-        }
-    }
-    SettingsEntry("其他配网方式", "通过当前连接扫描并添加网络") { manual = !manual }
-    if (manual) {
-        TextButton(
-            enabled = !busy && !scanning && !connecting,
-            onClick = {
-                scanning = true
-                scope.launch {
-                    try {
-                        val host = target()
-                        var scan = app.api.json(host, "/api/scan", emptyMap())
-                        withTimeout(15000) {
-                            while (scan["scanning"]?.jsonPrimitive?.booleanOrNull == true) {
-                                delay(450)
-                                scan = app.api.json(host, "/api/scan")
-                            }
-                        }
-                        networks = scan["networks"]?.jsonArray?.map { it.jsonObject }.orEmpty()
-                        message = if (networks.isEmpty()) "未发现网络，可重新扫描或输入隐藏网络" else null
-                    } catch (cancel: TimeoutCancellationException) {
-                        message = "扫描超时，请重试"
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (e: Exception) {
-                        message = e.message
-                    } finally {
-                        scanning = false
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(name, color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-            },
-        ) {
-            Text(if (scanning) "正在扫描" else "扫描附近网络")
+                TextButton(enabled = !busy && !scanning && !connecting, onClick = { forgetting = name }) { Text("忘记") }
+            }
+        }
+    }
+    if (!adding) TextButton(
+        enabled = !busy && !scanning && !connecting,
+        contentPadding = PaddingValues(vertical = 12.dp),
+        onClick = { adding = true; ssid = null; hidden = false; password = ""; scan() },
+    ) { Text("添加网络") }
+    ExpandingSection(adding) {
+        Spacer(Modifier.height(14.dp))
+        if (scanning) {
+            ConnectionStatus(null, "正在扫描附近网络…", compact = true)
         }
         networks.forEach { network ->
-            val networkSsid = network["ssid"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val name = network["ssid"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val rssi = network["rssi"]?.jsonPrimitive?.intOrNull ?: -100
             TextButton(
-                enabled = !busy && !connecting,
-                onClick = {
-                    ssid = networkSsid
-                    password = ""
-                },
+                enabled = !busy && !scanning && !connecting,
+                onClick = { ssid = name; password = ""; hidden = false },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 10.dp),
             ) {
-                Text(
-                    "$networkSsid   ${network["rssi"]?.jsonPrimitive?.contentOrNull.orEmpty()} dBm"
-                )
+                Text(name, Modifier.weight(1f), color = Cream, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (rssi >= -60) "信号强" else if (rssi >= -75) "信号良好" else "信号较弱", color = Muted, fontSize = 12.sp)
             }
         }
-        OutlinedTextField(
-            ssid,
-            { ssid = it },
-            enabled = !busy && !connecting,
-            label = { Text("选择网络或输入隐藏 SSID") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(
-            password,
-            { password = it },
-            enabled = !busy && !connecting,
-            label = { Text("密码") },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextButton(
-            enabled = !busy && !connecting && ssid.isNotBlank(),
-            onClick = {
-                action("/api/wifi", mapOf("ssid" to ssid, "password" to password))
-                password = ""
-            },
-        ) {
-            Text("连接并优先保存")
+        Row {
+            TextButton(enabled = !scanning && !busy, onClick = { scan() }) { Text("重新扫描") }
+            TextButton(enabled = !scanning && !busy, onClick = { hidden = true; ssid = ""; password = "" }) { Text("隐藏网络") }
         }
+        ExpandingSection(hidden) {
+            ConnectionField(ssid.orEmpty(), { ssid = it }, enabled = !busy && !connecting,
+                label = { Text("网络名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+        if (!hidden) ssid?.let { Text(it, modifier = Modifier.padding(vertical = 12.dp), color = Cream) }
+        ExpandingSection(ssid != null) {
+            Spacer(Modifier.height(10.dp))
+            ConnectionField(password, { password = it }, enabled = !busy && !connecting,
+                label = { Text("Wi-Fi 密码") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth())
+            TextButton(enabled = !busy && !scanning && !connecting && !ssid.isNullOrBlank(),
+                onClick = { ssid?.let { name -> action(connectTo = name) { client.connect(name, password) } } }) { Text("连接并保存") }
+        }
+        TextButton(enabled = !busy, onClick = { adding = false; password = ""; ssid = null }) { Text("取消添加") }
     }
-    message?.let { Text(it, color = Gold, modifier = Modifier.padding(vertical = 12.dp)) }
+    if (busy) Text("正在更新网络设置…", color = Muted, fontSize = 13.sp)
+    message?.let { Text(it, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp)) }
+
+    HorizontalDivider(Modifier.padding(top = 24.dp), color = MaterialTheme.colorScheme.outlineVariant)
+    SettingsSection(SettingsGlyph.Hotspot, "配网热点")
+    if (state?.containsKey("ap_hidden") == true) {
+        AccessPointSettings(client = client, lampId = lamp.id,
+            enabled = !busy && !scanning && !connecting, onBusy = { busy = it })
+    } else Text(
+        if (state == null) "连接灯具所在 Wi-Fi 或配网热点后，可查看热点设置。"
+        else "当前固件尚不支持在 App 中管理配网热点。",
+        color = Muted, fontSize = 13.sp, lineHeight = 20.sp,
+    )
+
+    forgetting?.let { name ->
+        AlertDialog(onDismissRequest = { forgetting = null },
+            title = { DialogMotion(); Text("忘记网络？") }, text = { Text("移除灯具保存的「$name」网络资料。") },
+            confirmButton = { TextButton(onClick = { forgetting = null; action { client.forget(name) } }) { Text("忘记") } },
+            dismissButton = { TextButton(onClick = { forgetting = null }) { Text("取消") } })
+    }
 }
