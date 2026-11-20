@@ -22,14 +22,13 @@
 | **04** | 网页与 Android 控制 | 通过设备内嵌网页、HTTP 接口或 Android 客户端管理灯光和配网。Android 蓝牙功能用于配网，灯光控制使用局域网 HTTP。 |
 | **05** | 设备发现 | 支持 mDNS 和基于站点 MAC 的设备标识；实际发现能力取决于网络环境。 |
 
-## 网页控制演示
+## Android 控制界面预览
 
-| 网页滑动调光 | 网页呼吸模式 |
+| 灯板调光 | 呼吸模式 |
 | :---: | :---: |
-| ![设备网页滑动调光实录](docs/assets/readme-web-dimming.gif) | ![设备网页呼吸模式实录](docs/assets/readme-web-breathing.gif) |
-| 在灯面上滑动，调整亮度 | 切换呼吸模式，查看波形与参数 |
+| ![RhodesLight 灯板亮度由低到高再回落](docs/assets/readme-android-dimming.gif) | ![呼吸模式下的灯板、状态球和亮度曲线](docs/assets/readme-android-breathing.gif) |
 
-<sub>以上为连接设备的 Web 页面操作录屏，并非实体灯具的实拍画面；实际灯光效果以设备表现为准。</sub>
+动图由当前 Android 开发版界面使用模拟设备数据渲染。[下载最新 Android 开发包](https://openrhodes-apk.buzzy-crow-9347.chatgpt.site/)
 
 ## 快速开始
 
