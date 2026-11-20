@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/readme-hero.svg" alt="OpenRhodes 项目封面：深色背景中的暖光灯具插画" width="100%" />
+  <img src="docs/assets/readme-hero.svg" alt="Open Rhodes 字标与亮着绿色状态灯的琥珀色玻璃灯板" width="100%" />
 
   **让光，随触碰与节奏自然变化。**
 
