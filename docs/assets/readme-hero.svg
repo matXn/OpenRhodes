@@ -1,21 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title desc">
   <title id="title">Open Rhodes</title>
-  <desc id="desc">深色背景上的 Open Rhodes 字标与琥珀色玻璃灯板，柔光斜穿灯面，右上角亮着绿色状态灯。</desc>
+  <desc id="desc">深色背景上的 Open Rhodes 字标与琥珀色玻璃灯板，彩色边光沿轮廓流动并向外轻轻散开，右上角亮着绿色状态灯。</desc>
   <defs>
-    <linearGradient id="sky" x2="1" y2=".3" gradientUnits="objectBoundingBox"><stop stop-color="#111115"/><stop offset=".49" stop-color="#171419"/><stop offset="1" stop-color="#271d26"/></linearGradient>
-    <radialGradient id="ambient"><stop stop-color="#de8d51" stop-opacity=".47"/><stop offset=".46" stop-color="#985355" stop-opacity=".16"/><stop offset="1" stop-color="#88535c" stop-opacity="0"/></radialGradient>
     <linearGradient id="glass" x1="0%" y1="0%" x2="90%" y2="90%"><stop stop-color="#fff2a4"/><stop offset=".19" stop-color="#ffc267"/><stop offset=".53" stop-color="#f19b38"/><stop offset=".83" stop-color="#ffbd4c"/><stop offset="1" stop-color="#ffdf8c"/></linearGradient>
-    <linearGradient id="rim" x2="100%" y2="60%"><stop stop-color="#cee9ff"/><stop offset=".26" stop-color="#fff6bd"/><stop offset=".54" stop-color="#ffd5be"/><stop offset=".77" stop-color="#e9b5d9"/><stop offset="1" stop-color="#d5d6fd"/></linearGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="-42" y1="142" x2="446" y2="142">
+      <stop stop-color="#a8d8ff"/><stop offset=".25" stop-color="#d6befc"/>
+      <stop offset=".5" stop-color="#ffc8ac"/><stop offset=".75" stop-color="#fff0ae"/>
+      <stop offset="1" stop-color="#b2e1e7"/>
+      <animateTransform attributeName="gradientTransform" type="rotate"
+        from="0 202 142" to="360 202 142" dur="12s" repeatCount="indefinite"/>
+    </linearGradient>
+    <filter id="spill" x="-12%" y="-18%" width="124%" height="136%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
     <linearGradient id="foot" x2="10%" y2="100%"><stop stop-color="#df958b"/><stop offset=".67" stop-color="#edab82"/><stop offset="1" stop-color="#82554d"/></linearGradient>
     <radialGradient id="led"><stop stop-color="#d6ffbd"/><stop offset=".36" stop-color="#a9e698"/><stop offset=".62" stop-color="#a7d290" stop-opacity=".65"/><stop offset="1" stop-color="#afcf88" stop-opacity="0"/></radialGradient>
     <clipPath id="face"><rect x="2" y="2" width="400" height="280" rx="38"/></clipPath>
     <filter id="mist" x="-40%" y="-50%" width="180%" height="200%"><feGaussianBlur stdDeviation="21"/></filter>
     <filter id="soft" x="-25%" y="-50%" width="150%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
   </defs>
-  <rect width="1280" height="440" fill="url(#sky)"/>
-  <ellipse cx="963" cy="330" rx="426" ry="206" fill="url(#ambient)"/>
+  <rect width="1280" height="440" fill="#101013"/>
   <g transform="translate(726 103) matrix(1 -.15 .22 .88 0 0)">
-    <rect x="3" y="36" width="404" height="274" rx="41" fill="#0d0a10" opacity=".69" filter="url(#mist)"/>
+    <rect y="4" width="404" height="284" rx="39" fill="none" stroke="url(#rim)"
+      stroke-width="12" opacity=".39" filter="url(#spill)"/>
     <rect y="9" width="404" height="284" rx="39" fill="url(#foot)"/>
     <rect width="404" height="284" rx="39" fill="url(#glass)" stroke="url(#rim)" stroke-width="3"/>
     <g clip-path="url(#face)">

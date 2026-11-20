@@ -90,7 +90,6 @@ OpenRhodes/
 | 配网优先级、扫描与重连 | [Wi-Fi 配网优先级](esp_fw/docs/wifi-setup-priority.md) |
 | 热点可见性与设备发现 | [隐藏配网热点](esp_fw/docs/hidden-setup-ap.md) · [设备身份与 mDNS](esp_fw/docs/mdns-identity.md) |
 | 项目术语与架构记录 | [领域模型](CONTEXT.md) · [架构决策](docs/adr/) |
-| Agent 协作约定 | [AGENTS.md](AGENTS.md) |
 
 ## 参与协作
 
